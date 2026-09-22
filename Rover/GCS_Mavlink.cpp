@@ -879,6 +879,10 @@ void GCS_MAVLINK_Rover::handle_message(const mavlink_message_t &msg)
         handle_set_position_target_global_int(msg);
         break;
 
+    case MAVLINK_MSG_ID_WHEEL_DISTANCE:
+        handle_wheel_distance(msg);
+        break;
+
     default:
         GCS_MAVLINK::handle_message(msg);
         break;
@@ -1151,6 +1155,18 @@ void GCS_MAVLINK_Rover::handle_set_position_target_global_int(const mavlink_mess
         // consume just turn rate(probably only skid steering vehicles can do this)
         rover.mode_guided.set_desired_turn_rate_and_speed(target_turn_rate_cds, 0.0f);
     }
+}
+
+/*
+  handle a WHEEL_DISTANCE message from an external (non-FC-GPIO) wheel
+  encoder board. Storage/consumption lives in AP_WheelDistance_Mav, fed to
+  the EKF from Rover::update_wheel_distance_mav() - see
+  docs/ARCTERON_WHEEL_DISTANCE_MAVLINK_SPEC.md and
+  docs/ARCTERON_WHEEL_ENCODERS_TRACTION_CONTROL.md in the seair repo.
+*/
+void GCS_MAVLINK_Rover::handle_wheel_distance(const mavlink_message_t &msg)
+{
+    rover.g2.wheel_distance_mav.handle_msg(msg);
 }
 
 /*
