@@ -17,9 +17,12 @@
 #include <AP_Common/AP_Common.h>
 #include <AP_Param/AP_Param.h>
 #include <AP_Math/AP_Math.h>
+#include <GCS_MAVLink/GCS_MAVLink.h>
 
-// Maximum number of WheelEncoder measurement instances available on this platform
-#define WHEELENCODER_MAX_INSTANCES      2
+// Maximum number of WheelEncoder measurement instances available on this platform.
+// 4 rather than 2 so a vehicle carrying one encoder per wheel - rather than one
+// per side - can be represented; see the MAVLink backend.
+#define WHEELENCODER_MAX_INSTANCES      4
 #define WHEELENCODER_CPR_DEFAULT        3200    // default encoder counts per full revolution of the wheel
 #define WHEELENCODER_RADIUS_DEFAULT     0.05f   // default wheel radius of 5cm (0.05m)
 
@@ -31,6 +34,7 @@ public:
     friend class AP_WheelEncoder_Backend;
     friend class AP_WheelEncoder_Quadrature;
     friend class AP_WheelEncoder_SITL_Quadrature;
+    friend class AP_WheelEncoder_MAV;
 
     AP_WheelEncoder(void);
 
@@ -46,6 +50,7 @@ public:
     enum WheelEncoder_Type : uint8_t {
         WheelEncoder_TYPE_NONE             =   0,
         WheelEncoder_TYPE_QUADRATURE       =   1,
+        WheelEncoder_TYPE_MAVLINK          =   2,
         WheelEncoder_TYPE_SITL_QUADRATURE  =  10,
     };
 
@@ -108,6 +113,15 @@ public:
 
     // get the system time (in milliseconds) of the last update
     uint32_t get_last_reading_ms(uint8_t instance) const;
+
+    // consume an incoming MAVLink message (WHEEL_DISTANCE); ignored unless
+    // at least one instance is configured as WheelEncoder_TYPE_MAVLINK
+    void handle_msg(const mavlink_message_t &msg);
+
+    // true if an unchanged reading from this instance means the wheel is
+    // stationary, rather than simply that no new data has arrived. See
+    // AP_WheelEncoder_Backend::no_data_means_stopped().
+    bool no_data_means_stopped(uint8_t instance) const;
 
     static const struct AP_Param::GroupInfo var_info[];
 

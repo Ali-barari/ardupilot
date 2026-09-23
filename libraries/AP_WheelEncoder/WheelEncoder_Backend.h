@@ -30,6 +30,13 @@ public:
     // update the state structure. All backends must implement this.
     virtual void update() = 0;
 
+    // True if this sensor is read continuously, so that an unchanged reading
+    // means the wheel is not turning - the case for a locally decoded encoder,
+    // where the absence of a pulse is itself a measurement. False for a sensor
+    // fed by an external stream, where an unchanged reading only means no new
+    // data has arrived, and says nothing about whether the wheel moved.
+    virtual bool no_data_means_stopped() const { return true; }
+
 protected:
 
     // return pin number.  returns -1 if pin is not defined for this instance

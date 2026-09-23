@@ -1158,15 +1158,14 @@ void GCS_MAVLINK_Rover::handle_set_position_target_global_int(const mavlink_mess
 }
 
 /*
-  handle a WHEEL_DISTANCE message from an external (non-FC-GPIO) wheel
-  encoder board. Storage/consumption lives in AP_WheelDistance_Mav, fed to
-  the EKF from Rover::update_wheel_distance_mav() - see
-  docs/ARCTERON_WHEEL_DISTANCE_MAVLINK_SPEC.md and
-  docs/ARCTERON_WHEEL_ENCODERS_TRACTION_CONTROL.md in the seair repo.
+  handle a WHEEL_DISTANCE message from an external wheel encoder board.
+  Consumed by any AP_WheelEncoder instance configured as WENCx_TYPE = 2
+  (MAVLink); from there it follows the same path as a locally decoded
+  encoder, including the EKF feed in Rover::update_wheel_encoder().
 */
 void GCS_MAVLINK_Rover::handle_wheel_distance(const mavlink_message_t &msg)
 {
-    rover.g2.wheel_distance_mav.handle_msg(msg);
+    rover.g2.wheel_encoder.handle_msg(msg);
 }
 
 /*

@@ -16,6 +16,7 @@
 #include "AP_WheelEncoder.h"
 #include "WheelEncoder_Quadrature.h"
 #include "WheelEncoder_SITL_Quadrature.h"
+#include "WheelEncoder_MAV.h"
 #include <AP_Logger/AP_Logger.h>
 
 extern const AP_HAL::HAL& hal;
@@ -25,7 +26,7 @@ const AP_Param::GroupInfo AP_WheelEncoder::var_info[] = {
     // @Param: _TYPE
     // @DisplayName: WheelEncoder type
     // @Description: What type of WheelEncoder is connected
-    // @Values: 0:None,1:Quadrature,10:SITL Quadrature
+    // @Values: 0:None,1:Quadrature,2:MAVLink,10:SITL Quadrature
     // @User: Standard
     AP_GROUPINFO_FLAGS("_TYPE", 0, AP_WheelEncoder, _type[0], 0, AP_PARAM_FLAG_ENABLE),
 
@@ -87,7 +88,7 @@ const AP_Param::GroupInfo AP_WheelEncoder::var_info[] = {
     // @Param: 2_TYPE
     // @DisplayName: Second WheelEncoder type
     // @Description: What type of WheelEncoder sensor is connected
-    // @Values: 0:None,1:Quadrature,10:SITL Quadrature
+    // @Values: 0:None,1:Quadrature,2:MAVLink,10:SITL Quadrature
     // @User: Standard
     AP_GROUPINFO("2_TYPE",   6, AP_WheelEncoder, _type[1], 0),
 
@@ -146,6 +147,132 @@ const AP_Param::GroupInfo AP_WheelEncoder::var_info[] = {
     AP_GROUPINFO("2_PINB",   11, AP_WheelEncoder, _pinb[1], 52),
 #endif
 
+#if WHEELENCODER_MAX_INSTANCES > 2
+    // @Param: 3_TYPE
+    // @DisplayName: Third WheelEncoder type
+    // @Description: What type of WheelEncoder sensor is connected
+    // @Values: 0:None,1:Quadrature,2:MAVLink,10:SITL Quadrature
+    // @User: Standard
+    AP_GROUPINFO("3_TYPE",   12, AP_WheelEncoder, _type[2], 0),
+
+    // @Param: 3_CPR
+    // @DisplayName: WheelEncoder 3 counts per revolution
+    // @Description: WheelEncoder 3 counts per full revolution of the wheel
+    // @Increment: 1
+    // @User: Standard
+    AP_GROUPINFO("3_CPR",    13, AP_WheelEncoder, _counts_per_revolution[2], WHEELENCODER_CPR_DEFAULT),
+
+    // @Param: 3_RADIUS
+    // @DisplayName: Wheel3's radius
+    // @Description: Wheel3's radius
+    // @Units: m
+    // @Increment: 0.001
+    // @User: Standard
+    AP_GROUPINFO("3_RADIUS", 14, AP_WheelEncoder, _wheel_radius[2], WHEELENCODER_RADIUS_DEFAULT),
+
+    // @Param: 3_POS_X
+    // @DisplayName: Wheel3's X position offset
+    // @Description: X position of the center of the third wheel in body frame. Positive X is forward of the origin.
+    // @Units: m
+    // @Range: -5 5
+    // @Increment: 0.01
+    // @User: Standard
+
+    // @Param: 3_POS_Y
+    // @DisplayName: Wheel3's Y position offset
+    // @Description: Y position of the center of the third wheel in body frame. Positive Y is to the right of the origin.
+    // @Units: m
+    // @Range: -5 5
+    // @Increment: 0.01
+    // @User: Standard
+
+    // @Param: 3_POS_Z
+    // @DisplayName: Wheel3's Z position offset
+    // @Description: Z position of the center of the third wheel in body frame. Positive Z is down from the origin.
+    // @Units: m
+    // @Range: -5 5
+    // @Increment: 0.01
+    // @User: Standard
+    AP_GROUPINFO("3_POS",    15, AP_WheelEncoder, _pos_offset[2], 0.0f),
+
+    // @Param: 3_PINA
+    // @DisplayName: Third Encoder Input Pin A
+    // @Description: Third Encoder Input Pin A
+    // @Values: -1:Disabled,50:AUX1,51:AUX2,52:AUX3,53:AUX4,54:AUX5,55:AUX6
+    // @User: Standard
+    AP_GROUPINFO("3_PINA",   16, AP_WheelEncoder, _pina[2], -1),
+
+    // @Param: 3_PINB
+    // @DisplayName: Third Encoder Input Pin B
+    // @Description: Third Encoder Input Pin B
+    // @Values: -1:Disabled,50:AUX1,51:AUX2,52:AUX3,53:AUX4,54:AUX5,55:AUX6
+    // @User: Standard
+    AP_GROUPINFO("3_PINB",   17, AP_WheelEncoder, _pinb[2], -1),
+#endif
+
+#if WHEELENCODER_MAX_INSTANCES > 3
+    // @Param: 4_TYPE
+    // @DisplayName: Fourth WheelEncoder type
+    // @Description: What type of WheelEncoder sensor is connected
+    // @Values: 0:None,1:Quadrature,2:MAVLink,10:SITL Quadrature
+    // @User: Standard
+    AP_GROUPINFO("4_TYPE",   18, AP_WheelEncoder, _type[3], 0),
+
+    // @Param: 4_CPR
+    // @DisplayName: WheelEncoder 4 counts per revolution
+    // @Description: WheelEncoder 4 counts per full revolution of the wheel
+    // @Increment: 1
+    // @User: Standard
+    AP_GROUPINFO("4_CPR",    19, AP_WheelEncoder, _counts_per_revolution[3], WHEELENCODER_CPR_DEFAULT),
+
+    // @Param: 4_RADIUS
+    // @DisplayName: Wheel4's radius
+    // @Description: Wheel4's radius
+    // @Units: m
+    // @Increment: 0.001
+    // @User: Standard
+    AP_GROUPINFO("4_RADIUS", 20, AP_WheelEncoder, _wheel_radius[3], WHEELENCODER_RADIUS_DEFAULT),
+
+    // @Param: 4_POS_X
+    // @DisplayName: Wheel4's X position offset
+    // @Description: X position of the center of the fourth wheel in body frame. Positive X is forward of the origin.
+    // @Units: m
+    // @Range: -5 5
+    // @Increment: 0.01
+    // @User: Standard
+
+    // @Param: 4_POS_Y
+    // @DisplayName: Wheel4's Y position offset
+    // @Description: Y position of the center of the fourth wheel in body frame. Positive Y is to the right of the origin.
+    // @Units: m
+    // @Range: -5 5
+    // @Increment: 0.01
+    // @User: Standard
+
+    // @Param: 4_POS_Z
+    // @DisplayName: Wheel4's Z position offset
+    // @Description: Z position of the center of the fourth wheel in body frame. Positive Z is down from the origin.
+    // @Units: m
+    // @Range: -5 5
+    // @Increment: 0.01
+    // @User: Standard
+    AP_GROUPINFO("4_POS",    21, AP_WheelEncoder, _pos_offset[3], 0.0f),
+
+    // @Param: 4_PINA
+    // @DisplayName: Fourth Encoder Input Pin A
+    // @Description: Fourth Encoder Input Pin A
+    // @Values: -1:Disabled,50:AUX1,51:AUX2,52:AUX3,53:AUX4,54:AUX5,55:AUX6
+    // @User: Standard
+    AP_GROUPINFO("4_PINA",   22, AP_WheelEncoder, _pina[3], -1),
+
+    // @Param: 4_PINB
+    // @DisplayName: Fourth Encoder Input Pin B
+    // @Description: Fourth Encoder Input Pin B
+    // @Values: -1:Disabled,50:AUX1,51:AUX2,52:AUX3,53:AUX4,54:AUX5,55:AUX6
+    // @User: Standard
+    AP_GROUPINFO("4_PINB",   23, AP_WheelEncoder, _pinb[3], -1),
+#endif
+
     AP_GROUPEND
 };
 
@@ -172,12 +299,16 @@ void AP_WheelEncoder::init(void)
 #endif
             break;
 
+        case WheelEncoder_TYPE_MAVLINK:
+            drivers[i] = NEW_NOTHROW AP_WheelEncoder_MAV(*this, i, state[i]);
+            break;
+
         case WheelEncoder_TYPE_SITL_QUADRATURE:
 #if CONFIG_HAL_BOARD == HAL_BOARD_SITL
             drivers[i] = NEW_NOTHROW AP_WheelEncoder_SITL_Quadrature(*this, i, state[i]);
 #endif
             break;
-            
+
         case WheelEncoder_TYPE_NONE:
             break;
         }
@@ -199,6 +330,40 @@ void AP_WheelEncoder::update(void)
             drivers[i]->update();
         }
     }
+}
+
+// pass an incoming WHEEL_DISTANCE message to any MAVLink-fed instances. One
+// message carries every wheel, so it is offered to all of them; each takes
+// the distance[] entry matching its own instance number.
+void AP_WheelEncoder::handle_msg(const mavlink_message_t &msg)
+{
+    if (msg.msgid != MAVLINK_MSG_ID_WHEEL_DISTANCE) {
+        return;
+    }
+
+    mavlink_wheel_distance_t packet;
+    bool decoded = false;
+
+    for (uint8_t i=0; i<num_instances; i++) {
+        if (drivers[i] == nullptr || _type[i] != WheelEncoder_TYPE_MAVLINK) {
+            continue;
+        }
+        if (!decoded) {
+            mavlink_msg_wheel_distance_decode(&msg, &packet);
+            decoded = true;
+        }
+        ((AP_WheelEncoder_MAV*)drivers[i])->handle_msg(packet);
+    }
+}
+
+// true if an unchanged reading from this instance means the wheel is
+// stationary rather than that no new data has arrived
+bool AP_WheelEncoder::no_data_means_stopped(uint8_t instance) const
+{
+    if (instance >= WHEELENCODER_MAX_INSTANCES || drivers[instance] == nullptr) {
+        return true;
+    }
+    return drivers[instance]->no_data_means_stopped();
 }
 
 #if HAL_LOGGING_ENABLED

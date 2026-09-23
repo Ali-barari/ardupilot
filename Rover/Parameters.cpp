@@ -694,10 +694,6 @@ const AP_Param::GroupInfo ParametersG2::var_info[] = {
     // @Path: mode_circle.cpp
     AP_SUBGROUPINFO(mode_circle, "CIRC", 57, ParametersG2, ModeCircle),
 
-    // @Group: WHLDIST
-    // @Path: AP_WheelDistance_Mav.cpp
-    AP_SUBGROUPINFO(wheel_distance_mav, "WHLDIST", 58, ParametersG2, AP_WheelDistance_Mav),
-
     AP_GROUPEND
 };
 

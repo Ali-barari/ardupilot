@@ -10,7 +10,6 @@
 #include <AP_Follow/AP_Follow.h>
 #include <AP_Proximity/AP_Proximity.h>
 #include "AP_Rally.h"
-#include "AP_WheelDistance_Mav.h"
 #include <AP_SmartRTL/AP_SmartRTL.h>
 #include <AP_Stats/AP_Stats.h>
 #include "AP_Torqeedo/AP_Torqeedo.h"
@@ -437,9 +436,6 @@ public:
     AP_Float fs_gcs_timeout;
 
     class ModeCircle mode_circle;
-
-    // external (MAVLink WHEEL_DISTANCE) wheel odometry, see AP_WheelDistance_Mav.h
-    AP_WheelDistance_Mav wheel_distance_mav;
 };
 
 extern const AP_Param::Info var_info[];

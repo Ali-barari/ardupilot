@@ -88,7 +88,6 @@ const AP_Scheduler::Task Rover::scheduler_tasks[] = {
 #endif
     SCHED_TASK_CLASS(AP_WindVane,         &rover.g2.windvane,      update,         20,  100,  30),
     SCHED_TASK(update_wheel_encoder,   50,    200,  36),
-    SCHED_TASK(update_wheel_distance_mav, 50, 200,  37),
     SCHED_TASK(update_compass,         10,    200,  39),
 #if HAL_LOGGING_ENABLED
     SCHED_TASK(update_logging1,        10,    200,  45),
