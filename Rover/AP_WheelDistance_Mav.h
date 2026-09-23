@@ -39,7 +39,8 @@
 #include <GCS_MAVLink/GCS_MAVLink.h>
 
 #define AP_WHEELDISTANCE_MAV_NUM_WHEELS   4
-#define AP_WHEELDISTANCE_MAV_TIMEOUT_MS   500   // consider the link down if no packet in this long
+#define AP_WHEELDISTANCE_MAV_TIMEOUT_MS   500     // consider the link down if no packet in this long
+#define AP_WHEELDISTANCE_MAV_MAX_DT       0.25f   // discard observations spanning longer than this (s)
 
 class AP_WheelDistance_Mav {
 public:

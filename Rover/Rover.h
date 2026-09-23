@@ -244,7 +244,6 @@ private:
     bool wheel_distance_mav_initialised;                                              // true once arrays below have been initialised to sensors initial values
     float wheel_distance_mav_last_distance_m[AP_WHEELDISTANCE_MAV_NUM_WHEELS];        // distance (m) at time of last update sent to EKF
     uint64_t wheel_distance_mav_last_time_usec[AP_WHEELDISTANCE_MAV_NUM_WHEELS];      // board-side packet timestamp (us) at time of last update sent to EKF, per wheel
-    uint32_t wheel_distance_mav_last_reading_ms[AP_WHEELDISTANCE_MAV_NUM_WHEELS];     // system time of last update sent to EKF, per wheel (fallback if the board's clock doesn't advance)
     uint8_t wheel_distance_mav_last_index_sent;                                       // index of the last wheel sent to the EKF
     uint32_t wheel_distance_mav_conflict_warn_ms;                                     // throttles the WENC_TYPE-conflict warning below
 

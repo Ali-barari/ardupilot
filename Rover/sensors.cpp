@@ -122,11 +122,9 @@ void Rover::update_wheel_distance_mav()
     // initialise on first iteration
     if (!wheel_distance_mav_initialised) {
         wheel_distance_mav_initialised = true;
-        const uint32_t now_ms = AP_HAL::millis();
         for (uint8_t i = 0; i < num_wheels; i++) {
             wheel_distance_mav_last_distance_m[i] = g2.wheel_distance_mav.get_distance(i);
             wheel_distance_mav_last_time_usec[i] = g2.wheel_distance_mav.get_last_time_usec();
-            wheel_distance_mav_last_reading_ms[i] = now_ms;
         }
         return;
     }
@@ -147,52 +145,42 @@ void Rover::update_wheel_distance_mav()
 
     const float curr_distance_m = g2.wheel_distance_mav.get_distance(idx);
     const uint64_t curr_time_usec = g2.wheel_distance_mav.get_last_time_usec();
-    const uint32_t now_ms = AP_HAL::millis();
 
-    // convert linear distance delta (m) to angular delta (rad) using the
-    // configured wheel radius, matching AP_WheelEncoder's convention that
-    // writeWheelOdom() takes an angle, not a distance
-#if HAL_NAVEKF3_AVAILABLE
-    const float delta_distance_m = curr_distance_m - wheel_distance_mav_last_distance_m[idx];
-    const float delta_angle = delta_distance_m / wheel_radius;
-#endif
-    wheel_distance_mav_last_distance_m[idx] = curr_distance_m;
-
-    // calculate delta time using the board's own packet timestamps where
-    // they've actually advanced (time_usec is monotonic-since-boot on the
-    // board, NOT wall-clock - see ARCTERON_WHEEL_DISTANCE_MAVLINK_SPEC.md
-    // - so only deltas between our own two readings of it are meaningful).
-    // Fall back to wall-clock time since our last EKF feed if the board
-    // hasn't produced a new packet between two round-robin visits to this
-    // wheel (packet rate and this 50Hz round-robin aren't necessarily
-    // synchronised).
-    uint32_t sensor_diff_ms = (uint32_t)((curr_time_usec - wheel_distance_mav_last_time_usec[idx]) / 1000ULL);
-    if (sensor_diff_ms == 0 || sensor_diff_ms > 100) {
-        // board timestamp hasn't usefully advanced (stale/no new packet
-        // since our last visit to this wheel) - fall back to our own
-        // wall-clock gap since we last fed this wheel to the EKF
-        sensor_diff_ms = now_ms - wheel_distance_mav_last_reading_ms[idx];
+    // The board's time_usec is its own free-running monotonic counter, not
+    // the FC clock, so only the delta between two of our own readings of it
+    // is meaningful. If it hasn't advanced, no new packet has arrived for
+    // this wheel since we last fed it, so skip: feeding a zero-motion
+    // sample here would tell the EKF the wheel stopped, when all we
+    // actually know is that we have no new data. (update_wheel_encoder()
+    // above can safely synthesise one, because for a locally-decoded
+    // encoder "no pulse" really does mean "not turning".)
+    if (curr_time_usec <= wheel_distance_mav_last_time_usec[idx]) {
+        return;
     }
-    wheel_distance_mav_last_time_usec[idx] = curr_time_usec;
-    wheel_distance_mav_last_reading_ms[idx] = now_ms;
 
-    if (sensor_diff_ms == 0) {
-        // nothing new since the last feed for this wheel - skip rather
-        // than feed the EKF a zero-dt observation
+    const float delta_distance_m = curr_distance_m - wheel_distance_mav_last_distance_m[idx];
+    const float delta_time = (curr_time_usec - wheel_distance_mav_last_time_usec[idx]) * 1.0e-6f;
+
+    // re-baseline even if the observation is rejected below, so that a gap
+    // is dropped rather than folded into the next observation
+    wheel_distance_mav_last_distance_m[idx] = curr_distance_m;
+    wheel_distance_mav_last_time_usec[idx] = curr_time_usec;
+
+    if (delta_time > AP_WHEELDISTANCE_MAV_MAX_DT) {
+        // long gap (link dropped, board reset): don't hand the EKF one
+        // large lump of accumulated travel, just resync and carry on
         return;
     }
 
 #if HAL_NAVEKF3_AVAILABLE
-    const float delta_time = sensor_diff_ms * 0.001f;
-
     /* delAng is the measured change in angular position from the previous measurement where a positive rotation is produced by forward motion of the vehicle (rad)
      * delTime is the time interval for the measurement of delAng (sec)
      * timeStamp_ms is the time when the rotation was last measured (msec)
      * posOffset is the XYZ body frame position of the wheel hub (m)
      */
-    ahrs.EKF3.writeWheelOdom(delta_angle,
+    ahrs.EKF3.writeWheelOdom(delta_distance_m / wheel_radius,
                         delta_time,
-                        now_ms,
+                        g2.wheel_distance_mav.get_last_reading_ms(),
                         g2.wheel_distance_mav.get_pos_offset(idx),
                         wheel_radius);
 #endif
