@@ -20,6 +20,8 @@ def build(bld):
             'AP_Follow',
             'AP_WindVane',
             'AR_Motors',
+            'AR_WheelState',
+            'AR_HillHoldControl',
             'AP_Torqeedo',
             'AC_PrecLand',
             'AP_IRLock',

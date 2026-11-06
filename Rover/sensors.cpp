@@ -28,6 +28,11 @@ void Rover::update_wheel_encoder()
     // update encoders
     g2.wheel_encoder.update();
 
+#if AR_WHEELSTATE_ENABLED
+    // update wheel speeds, distances and standstill detection
+    g2.wheel_state.update();
+#endif
+
     // save cumulative distances at current time (in meters) for reporting to GCS
     for (uint8_t i = 0; i < g2.wheel_encoder.num_sensors(); i++) {
         wheel_encoder_last_distance_m[i] = g2.wheel_encoder.get_distance(i);

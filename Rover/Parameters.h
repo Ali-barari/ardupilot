@@ -314,6 +314,16 @@ public:
     AP_WheelEncoder wheel_encoder;
     AP_WheelRateControl wheel_rate_control;
 
+#if AR_WHEELSTATE_ENABLED
+    // wheel state estimator
+    AR_WheelState wheel_state;
+#endif
+
+#if AR_HILLHOLDCONTROL_ENABLED
+    // hill hold control
+    AR_HillHoldControl hill_hold;
+#endif
+
     // Motor library
     AP_MotorsUGV motors;
 

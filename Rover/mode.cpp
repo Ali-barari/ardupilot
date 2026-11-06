@@ -313,10 +313,18 @@ void Mode::calc_throttle(float target_speed, bool avoidance_enabled)
         if (is_zero(target_speed) && !rover.is_balancebot()) {
             bool stopped;
             throttle_out = 100.0f * attitude_control.get_throttle_out_stop(g2.motors.limit.throttle_lower, g2.motors.limit.throttle_upper, g.speed_cruise, g.throttle_cruise * 0.01f, rover.G_Dt, stopped);
+#if AR_HILLHOLDCONTROL_ENABLED
+            // hold the vehicle in place on slopes once it has nearly stopped
+            g2.hill_hold.update_stopped(g.speed_cruise, g.throttle_cruise * 0.01f, rover.G_Dt, throttle_out);
+#endif
         } else {
             bool motor_lim_low = g2.motors.limit.throttle_lower || attitude_control.pitch_limited();
             bool motor_lim_high = g2.motors.limit.throttle_upper || attitude_control.pitch_limited();
             throttle_out = 100.0f * attitude_control.get_throttle_out_speed(target_speed, motor_lim_low, motor_lim_high, g.speed_cruise, g.throttle_cruise * 0.01f, rover.G_Dt);
+#if AR_HILLHOLDCONTROL_ENABLED
+            // fade out any holding throttle while the speed controller takes over
+            g2.hill_hold.update_moving(target_speed, rover.G_Dt, throttle_out);
+#endif
         }
 
         // if vehicle is balance bot, calculate actual throttle required for balancing
@@ -342,6 +350,12 @@ bool Mode::stop_vehicle()
         rover.balancebot_pitch_control(throttle_out);
     } else {
         throttle_out = 100.0f * attitude_control.get_throttle_out_stop(g2.motors.limit.throttle_lower, g2.motors.limit.throttle_upper, g.speed_cruise, g.throttle_cruise * 0.01f, rover.G_Dt, stopped);
+#if AR_HILLHOLDCONTROL_ENABLED
+        // hold the vehicle in place on slopes once it has nearly stopped
+        if (g2.hill_hold.update_stopped(g.speed_cruise, g.throttle_cruise * 0.01f, rover.G_Dt, throttle_out)) {
+            stopped = true;
+        }
+#endif
     }
 
     // relax sails if present

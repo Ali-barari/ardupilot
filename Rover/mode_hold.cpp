@@ -8,6 +8,12 @@ void ModeHold::update()
     if (rover.is_balancebot()) {
         rover.balancebot_pitch_control(throttle);
     }
+#if AR_HILLHOLDCONTROL_ENABLED
+    else {
+        // stop the vehicle rolling down a slope
+        g2.hill_hold.update_stopped(g.speed_cruise, g.throttle_cruise * 0.01f, rover.G_Dt, throttle);
+    }
+#endif
 
     // relax mainsail
     g2.sailboat.relax_sails();

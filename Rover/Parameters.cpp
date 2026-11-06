@@ -694,6 +694,18 @@ const AP_Param::GroupInfo ParametersG2::var_info[] = {
     // @Path: mode_circle.cpp
     AP_SUBGROUPINFO(mode_circle, "CIRC", 57, ParametersG2, ModeCircle),
 
+#if AR_WHEELSTATE_ENABLED
+    // @Group: WST_
+    // @Path: ../libraries/AR_WheelState/AR_WheelState.cpp
+    AP_SUBGROUPINFO(wheel_state, "WST_", 58, ParametersG2, AR_WheelState),
+#endif
+
+#if AR_HILLHOLDCONTROL_ENABLED
+    // @Group: HHC_
+    // @Path: ../libraries/AR_HillHoldControl/AR_HillHoldControl.cpp
+    AP_SUBGROUPINFO(hill_hold, "HHC_", 59, ParametersG2, AR_HillHoldControl),
+#endif
+
     AP_GROUPEND
 };
 
@@ -736,6 +748,12 @@ ParametersG2::ParametersG2(void)
     beacon(),
 #endif
     wheel_rate_control(wheel_encoder),
+#if AR_WHEELSTATE_ENABLED
+    wheel_state(wheel_encoder),
+#endif
+#if AR_HILLHOLDCONTROL_ENABLED
+    hill_hold(wheel_state),
+#endif
     motors(wheel_rate_control),
     attitude_control(),
     smart_rtl(),
