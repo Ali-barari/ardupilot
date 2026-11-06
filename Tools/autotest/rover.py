@@ -4964,6 +4964,96 @@ Brakes have negligible effect (with=%0.2fm without=%0.2fm delta=%0.2fm)
                 raise NotAchievedException("wheel distance incorrect")
         self.disarm_vehicle()
 
+    def HillHoldControl(self):
+        '''check Hill Hold Control stops the rover rolling down a slope'''
+        # skid-steer model: its throttle response is closer to a real
+        # geared ground vehicle than the default model's
+        model = "rover-skid"
+        self.customise_SITL_commandline([],
+                                        model=model,
+                                        defaults_filepath=self.model_defaults_filepath(model))
+        self.set_parameters({
+            "WENC_TYPE": 10,
+            "HHC_ENABLE": 1,
+            # match the skid-steer model: 4 m/s at full throttle
+            "CRUISE_SPEED": 3,
+            "CRUISE_THROTTLE": 75,
+        })
+        self.reboot_sitl()
+        self.change_mode("ACRO")
+        self.wait_ready_to_arm()
+        self.arm_vehicle()
+
+        def wheel_distance():
+            return self.assert_receive_message('WHEEL_DISTANCE', timeout=5).distance[0]
+
+        def rolled(duration):
+            start = wheel_distance()
+            self.delay_sim_time(duration)
+            return wheel_distance() - start
+
+        # emulate a slope pulling the rover backwards with the sticks centred
+        self.set_parameters({
+            "SIM_SHOVE_X": -1.0,
+            "SIM_SHOVE_TIME": 60000,
+        })
+        self.delay_sim_time(3)
+        distance = rolled(10)
+        self.progress("Hill hold on: rolled %.3f m in 10 s" % distance)
+        if abs(distance) > 0.05:
+            raise NotAchievedException("Hill hold did not hold (rolled %.3f m)" % distance)
+
+        # driving forward (uphill) releases the hold
+        self.set_rc(3, 1700)
+        distance = rolled(3)
+        self.progress("Released uphill: moved %.3f m in 3 s" % distance)
+        if distance < 0.5:
+            raise NotAchievedException("Rover did not drive uphill after release (%.3f m)" % distance)
+
+        # sticks centred again: the hold re-engages with the I term preloaded
+        # from the speed controller, so the rover must not sag back
+        self.set_rc(3, 1500)
+        tstart = self.get_sim_time()
+        peak = None
+        sag = 0.0
+        while self.get_sim_time_cached() - tstart < 6:
+            d = wheel_distance()
+            peak = d if peak is None else max(peak, d)
+            sag = max(sag, peak - d)
+        self.progress("Hill hold re-engaged: sagged %.3f m after stopping" % sag)
+        if sag > 0.01:
+            raise NotAchievedException("Hill hold sagged %.3f m on re-engage" % sag)
+        distance = rolled(5)
+        self.progress("Hill hold re-engaged: rolled %.3f m in 5 s" % distance)
+        if abs(distance) > 0.05:
+            raise NotAchievedException("Hill hold did not re-engage (rolled %.3f m)" % distance)
+
+        # Hold mode also holds
+        self.change_mode("HOLD")
+        self.delay_sim_time(3)
+        distance = rolled(5)
+        self.progress("Hold mode: rolled %.3f m in 5 s" % distance)
+        if abs(distance) > 0.05:
+            raise NotAchievedException("Hill hold did not hold in Hold mode (rolled %.3f m)" % distance)
+
+        # Manual stays direct stick-to-motor: no hill hold
+        self.change_mode("MANUAL")
+        distance = rolled(3)
+        self.progress("Manual: rolled %.3f m in 3 s" % distance)
+        if distance > -0.3:
+            raise NotAchievedException("Hill hold must not act in Manual (rolled %.3f m)" % distance)
+
+        # disabled: the rover rolls back in Acro
+        self.change_mode("ACRO")
+        self.set_parameter("HHC_ENABLE", 0)
+        distance = rolled(5)
+        self.progress("Hill hold off: rolled %.3f m in 5 s" % distance)
+        if distance > -0.5:
+            raise NotAchievedException("Rover should roll back with hill hold off (%.3f m)" % distance)
+
+        self.set_parameter("SIM_SHOVE_TIME", 0)
+        self.disarm_vehicle()
+
     def test_poly_fence_object_avoidance_guided_two_squares(self, target_system=1, target_component=1):
         self.start_subtest("Ensure we can steer around obstacles in guided mode")
         here = self.mav.location()
@@ -6994,6 +7084,7 @@ Brakes have negligible effect (with=%0.2fm without=%0.2fm delta=%0.2fm)
             self.GCSRally,
             self.MotorTest,
             self.WheelEncoders,
+            self.HillHoldControl,
             self.DataFlashOverMAVLink,
             self.DataFlash,
             self.SkidSteer,
