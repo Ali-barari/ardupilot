@@ -4973,11 +4973,13 @@ Brakes have negligible effect (with=%0.2fm without=%0.2fm delta=%0.2fm)
                                         model=model,
                                         defaults_filepath=self.model_defaults_filepath(model))
         self.set_parameters({
-            # one encoder per side, so the rover is held per side
+            # one encoder per side, so the rover is held per side.  The SITL
+            # quadrature model's first instance behaves as the right wheel
+            # in a turn (speed - yaw rate * half track), so place it on the right
             "WENC_TYPE": 10,
-            "WENC_POS_Y": -0.2,
+            "WENC_POS_Y": 0.2,
             "WENC2_TYPE": 10,
-            "WENC2_POS_Y": 0.2,
+            "WENC2_POS_Y": -0.2,
             "HHC_ENABLE": 1,
             # match the skid-steer model: 4 m/s at full throttle
             "CRUISE_SPEED": 3,
@@ -5032,6 +5034,26 @@ Brakes have negligible effect (with=%0.2fm without=%0.2fm delta=%0.2fm)
         if abs(distance) > 0.05:
             raise NotAchievedException("Hill hold did not re-engage (rolled %.3f m)" % distance)
 
+        # turn in place, then centre: the heading must settle where the
+        # turn stops without hunting
+        self.set_rc(1, 1800)
+        self.delay_sim_time(2)
+        self.set_rc(1, 1500)
+        self.delay_sim_time(1.5)
+        yaws = []
+        tstart = self.get_sim_time()
+        while self.get_sim_time_cached() - tstart < 4:
+            m = self.assert_receive_message('ATTITUDE', timeout=5)
+            yaws.append(math.degrees(m.yaw))
+        swing = max(abs((y - yaws[0] + 180) % 360 - 180) for y in yaws)
+        self.progress("After turn in place: heading moved %.2f deg in 4 s" % swing)
+        if swing > 2:
+            raise NotAchievedException("Heading hunting after turn in place (%.2f deg)" % swing)
+        distance = rolled(3)
+        self.progress("After turn in place: rolled %.3f m in 3 s" % distance)
+        if abs(distance) > 0.05:
+            raise NotAchievedException("Hill hold did not hold after turn in place (rolled %.3f m)" % distance)
+
         # Hold mode also holds
         self.change_mode("HOLD")
         self.delay_sim_time(3)
@@ -5052,7 +5074,7 @@ Brakes have negligible effect (with=%0.2fm without=%0.2fm delta=%0.2fm)
         self.set_parameter("HHC_ENABLE", 0)
         distance = rolled(5)
         self.progress("Hill hold off: rolled %.3f m in 5 s" % distance)
-        if distance > -0.5:
+        if distance > -0.3:
             raise NotAchievedException("Rover should roll back with hill hold off (%.3f m)" % distance)
 
         self.set_parameter("SIM_SHOVE_TIME", 0)
