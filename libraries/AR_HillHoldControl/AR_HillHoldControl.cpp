@@ -45,9 +45,11 @@ extern const AP_HAL::HAL& hal;
 // a desired turn rate above this suspends the heading hold
 #define AR_HHC_TURN_RATE_MIN_DEG    1.0f
 
-// after a turn the hold point is locked again once the yaw rate has
-// fallen below this
+// the hold engages once the yaw rate has fallen below this and the
+// wheels have nearly stopped, or this long after the last speed or turn
+// request if the stop controller cannot stop the vehicle (e.g. on a slope)
 #define AR_HHC_TURN_STOPPED_DEG     2.0f
+#define AR_HHC_ENGAGE_TIMEOUT_MS    1000
 
 const AP_Param::GroupInfo AR_HillHoldControl::var_info[] = {
 
@@ -214,7 +216,6 @@ void AR_HillHoldControl::set_state(State new_state)
 void AR_HillHoldControl::start_hold(uint32_t now_ms, float throttle_per_speed, float ff)
 {
     _use_sides = _wheel_state.have_sides() && ((_options & uint8_t(Option::HOLD_HEADING)) != 0);
-    _turning = false;
     _hold_fwd = _wheel_state.get_mean_distance();
     _hold_diff = _use_sides ? 0.5f * (_wheel_state.get_side_distance(AR_WheelState::Side::RIGHT) - _wheel_state.get_side_distance(AR_WheelState::Side::LEFT)) : 0.0f;
     _hold_start_ms = now_ms;
@@ -334,15 +335,30 @@ bool AR_HillHoldControl::update_stopped(float cruise_speed, float cruise_throttl
         set_state(State::IDLE);
         FALLTHROUGH;
 
-    case State::IDLE:
-        // let the stop controller slow the vehicle until the wheels have nearly stopped
-        if (fabsf(_wheel_state.get_mean_speed()) > _engage_speed) {
+    case State::IDLE: {
+        // engage only when nothing is requested, once the stop controller
+        // has nearly stopped the wheels and the rotation, or after a
+        // timeout if it cannot (e.g. rolling down a slope)
+        if (_turn_requested) {
+            _request_ms = now_ms;
+            return false;
+        }
+        const bool stopped = (fabsf(_wheel_state.get_mean_speed()) <= _engage_speed) &&
+                             (fabsf(AP::ahrs().get_yaw_rate_earth()) <= radians(AR_HHC_TURN_STOPPED_DEG));
+        if (!stopped && ((now_ms - _request_ms) < AR_HHC_ENGAGE_TIMEOUT_MS)) {
             return false;
         }
         start_hold(now_ms, throttle_per_speed, ff);
         FALLTHROUGH;
+    }
 
     case State::HOLDING:
+        if (_turn_requested) {
+            // a turn in place was requested: release the hold entirely
+            _request_ms = now_ms;
+            set_state(State::IDLE);
+            return false;
+        }
         break;
     }
 
@@ -365,13 +381,6 @@ bool AR_HillHoldControl::update_stopped(float cruise_speed, float cruise_throttl
         } else if (((fwd - _hold_fwd) * _coast_dir) > 0.0f) {
             _hold_fwd = fwd;
         }
-    }
-
-    // while turning the hold point and heading follow the vehicle, so the
-    // hold does not fight the turn
-    if (_turning) {
-        _hold_fwd = fwd;
-        _hold_diff = diff;
     }
 
     // distance from the hold point (+ve means behind it) and heading error
@@ -406,28 +415,17 @@ bool AR_HillHoldControl::update_stopped(float cruise_speed, float cruise_throttl
     return true;
 }
 
-// call after update_stopped with the mode's desired turn rate (rad/s)
-// and steering output (-1 to +1).  A turn request suspends the hold
-// until the rotation has stopped.  With the heading hold option set,
-// the steering is otherwise replaced with the output that holds the heading
+// call each loop after update_stopped with the mode's desired turn
+// rate (rad/s) and steering output (-1 to +1).  A turn request
+// releases the hold; it engages again once nothing is requested and the
+// vehicle has stopped moving and rotating.  With the heading hold
+// option set, the steering is replaced with the output that holds the heading
 void AR_HillHoldControl::update_steering(float desired_turn_rate, float &steering_out)
 {
-    if (_state != State::HOLDING) {
-        return;
-    }
-    if (fabsf(desired_turn_rate) > radians(AR_HHC_TURN_RATE_MIN_DEG)) {
-        // turning in place: leave steering to the mode and let the hold point follow
-        _turning = true;
-        return;
-    }
-    if (_turning) {
-        // turn finished: let the mode stop the rotation, then hold where it stops
-        if (fabsf(AP::ahrs().get_yaw_rate_earth()) < radians(AR_HHC_TURN_STOPPED_DEG)) {
-            _turning = false;
-        }
-        return;
-    }
-    if (_use_sides) {
+    // remembered for the next update_stopped call
+    _turn_requested = fabsf(desired_turn_rate) > radians(AR_HHC_TURN_RATE_MIN_DEG);
+
+    if ((_state == State::HOLDING) && _use_sides && !_turn_requested) {
         steering_out = _hold_steering;
     }
 }
@@ -447,6 +445,7 @@ void AR_HillHoldControl::update_moving(float target_speed, float dt, float &thro
 
     const bool stale = (now_ms - _last_update_ms) > AR_HHC_UPDATE_TIMEOUT_MS;
     _last_update_ms = now_ms;
+    _request_ms = now_ms;
     if (stale) {
         set_state(State::IDLE);
         return;

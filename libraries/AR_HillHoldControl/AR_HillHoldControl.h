@@ -21,8 +21,10 @@
   vehicle is held there, so back-drivable drive trains do not roll down
   a slope.  The vehicle is held on the mean of all wheels and its turn
   rate controller holds the heading; with HHC_OPTIONS bit 0, skid-steer
-  vehicles are instead held per side, which also holds the heading.  A
-  turn request suspends the hold until the rotation has stopped.
+  vehicles are instead held per side, which also holds the heading.  Any
+  speed or turn request releases the hold, so the mode drives as it
+  would without it; the hold engages only once nothing is requested and
+  the vehicle has stopped moving and rotating.
 
   For each side a controller turns the distance from the hold point
   (P and I) and the wheel speed (damping) into a corrective speed, which
@@ -69,10 +71,11 @@ public:
     // Returns true while holding
     bool update_stopped(float cruise_speed, float cruise_throttle, float dt, float &throttle_out);
 
-    // call after update_stopped with the mode's desired turn rate (rad/s)
-    // and steering output (-1 to +1).  A turn request suspends the hold
-    // until the rotation has stopped.  With the heading hold option set,
-    // the steering is otherwise replaced with the output that holds the heading
+    // call each loop after update_stopped with the mode's desired turn
+    // rate (rad/s) and steering output (-1 to +1).  A turn request
+    // releases the hold; it engages again once nothing is requested and the
+    // vehicle has stopped moving and rotating.  With the heading hold
+    // option set, the steering is replaced with the output that holds the heading
     void update_steering(float desired_turn_rate, float &steering_out);
 
     // HHC_OPTIONS bits
@@ -141,7 +144,8 @@ private:
     float _hold_diff;           // half the right minus left distance at the hold point
     int8_t _coast_dir;          // direction the wheels were still turning when the hold engaged (+1, -1), 0 once locked
     bool _use_sides;            // true if holding each side separately
-    bool _turning;              // true while a turn is requested or the vehicle is still rotating after one
+    bool _turn_requested;       // true if the mode asked for a turn on its last update_steering call
+    uint32_t _request_ms;       // last time a speed or turn was requested
     SideHold _side[2];          // left/right, or [0] for the whole vehicle
     float _hold_output;         // mean holding throttle (-1 to +1)
     float _hold_steering;       // steering that holds the heading (-1 to +1)
