@@ -45,6 +45,10 @@ extern const AP_HAL::HAL& hal;
 // a desired turn rate above this suspends the heading hold
 #define AR_HHC_TURN_RATE_MIN_DEG    1.0f
 
+// after a turn the heading is held again once the sides' speed
+// difference (half right minus left) has fallen below this, in m/s
+#define AR_HHC_YAW_LOCK_SPEED       0.02f
+
 const AP_Param::GroupInfo AR_HillHoldControl::var_info[] = {
 
     // @Param: ENABLE
@@ -408,8 +412,12 @@ void AR_HillHoldControl::update_steering(float desired_turn_rate, float &steerin
         return;
     }
     if (!_yaw_hold) {
-        // turn finished: hold the new heading from the next update
-        _yaw_hold = true;
+        // turn finished: let the mode stop the rotation, then hold the
+        // heading where it stops (from the next update)
+        const float rotation_speed = 0.5f * (_wheel_state.get_side_speed(AR_WheelState::Side::RIGHT) - _wheel_state.get_side_speed(AR_WheelState::Side::LEFT));
+        if (fabsf(rotation_speed) < AR_HHC_YAW_LOCK_SPEED) {
+            _yaw_hold = true;
+        }
         return;
     }
     steering_out = _hold_steering;
