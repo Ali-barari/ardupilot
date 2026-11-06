@@ -19,8 +19,10 @@
   When the vehicle's mode asks for zero speed and the wheels have nearly
   stopped, the wheel positions are captured as a hold point and the
   vehicle is held there, so back-drivable drive trains do not roll down
-  a slope.  Skid-steer vehicles are held per side, which also holds the
-  heading; other vehicles are held on the mean of all wheels.
+  a slope.  The vehicle is held on the mean of all wheels and its turn
+  rate controller holds the heading; with HHC_OPTIONS bit 0, skid-steer
+  vehicles are instead held per side, which also holds the heading.  A
+  turn request suspends the hold until the rotation has stopped.
 
   For each side a controller turns the distance from the hold point
   (P and I) and the wheel speed (damping) into a corrective speed, which
@@ -68,10 +70,15 @@ public:
     bool update_stopped(float cruise_speed, float cruise_throttle, float dt, float &throttle_out);
 
     // call after update_stopped with the mode's desired turn rate (rad/s)
-    // and steering output (-1 to +1).  While holding with no turn
-    // requested the steering is replaced with the output that holds the
-    // heading.  A turn request suspends the heading hold
+    // and steering output (-1 to +1).  A turn request suspends the hold
+    // until the rotation has stopped.  With the heading hold option set,
+    // the steering is otherwise replaced with the output that holds the heading
     void update_steering(float desired_turn_rate, float &steering_out);
+
+    // HHC_OPTIONS bits
+    enum class Option : uint8_t {
+        HOLD_HEADING = (1U << 0),   // skid-steer: hold each side, which also holds the heading
+    };
 
     // call each loop while the mode asks for a non-zero speed.
     // throttle_out holds the speed controller's output (-100 to +100);
@@ -122,6 +129,7 @@ private:
     AP_Float _damp;             // corrective speed per m/s of wheel speed
     AP_Float _thr_min;          // dead-zone compensation, throttle %
     AP_Float _dir_hyst;         // direction change hysteresis, throttle %
+    AP_Int8 _options;           // HHC_OPTIONS bitmask
 
     const AR_WheelState &_wheel_state;
 
@@ -133,7 +141,7 @@ private:
     float _hold_diff;           // half the right minus left distance at the hold point
     int8_t _coast_dir;          // direction the wheels were still turning when the hold engaged (+1, -1), 0 once locked
     bool _use_sides;            // true if holding each side separately
-    bool _yaw_hold;             // true if the heading is being held (no turn requested)
+    bool _turning;              // true while a turn is requested or the vehicle is still rotating after one
     SideHold _side[2];          // left/right, or [0] for the whole vehicle
     float _hold_output;         // mean holding throttle (-1 to +1)
     float _hold_steering;       // steering that holds the heading (-1 to +1)

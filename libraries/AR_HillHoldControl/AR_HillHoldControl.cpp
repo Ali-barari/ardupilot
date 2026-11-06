@@ -45,9 +45,9 @@ extern const AP_HAL::HAL& hal;
 // a desired turn rate above this suspends the heading hold
 #define AR_HHC_TURN_RATE_MIN_DEG    1.0f
 
-// after a turn the heading is held again once the sides' speed
-// difference (half right minus left) has fallen below this, in m/s
-#define AR_HHC_YAW_LOCK_SPEED       0.02f
+// after a turn the hold point is locked again once the yaw rate has
+// fallen below this
+#define AR_HHC_TURN_STOPPED_DEG     2.0f
 
 const AP_Param::GroupInfo AR_HillHoldControl::var_info[] = {
 
@@ -165,6 +165,13 @@ const AP_Param::GroupInfo AR_HillHoldControl::var_info[] = {
     // @User: Advanced
     AP_GROUPINFO("HYST", 14, AR_HillHoldControl, _dir_hyst, 1.0f),
 
+    // @Param: OPTIONS
+    // @DisplayName: Hill hold options
+    // @Description: Hill hold options. Hold heading: on skid-steer vehicles with wheel encoders on both sides, hold each side separately, which also holds the heading. Without it the vehicle's turn rate controller holds the heading
+    // @Bitmask: 0:Hold heading
+    // @User: Advanced
+    AP_GROUPINFO("OPTIONS", 15, AR_HillHoldControl, _options, 0),
+
     AP_GROUPEND
 };
 
@@ -206,8 +213,8 @@ void AR_HillHoldControl::set_state(State new_state)
 //   slope and friction throttle while the vehicle slows down
 void AR_HillHoldControl::start_hold(uint32_t now_ms, float throttle_per_speed, float ff)
 {
-    _use_sides = _wheel_state.have_sides();
-    _yaw_hold = true;
+    _use_sides = _wheel_state.have_sides() && ((_options & uint8_t(Option::HOLD_HEADING)) != 0);
+    _turning = false;
     _hold_fwd = _wheel_state.get_mean_distance();
     _hold_diff = _use_sides ? 0.5f * (_wheel_state.get_side_distance(AR_WheelState::Side::RIGHT) - _wheel_state.get_side_distance(AR_WheelState::Side::LEFT)) : 0.0f;
     _hold_start_ms = now_ms;
@@ -360,8 +367,10 @@ bool AR_HillHoldControl::update_stopped(float cruise_speed, float cruise_throttl
         }
     }
 
-    // while a turn is requested the heading follows the vehicle
-    if (!_yaw_hold) {
+    // while turning the hold point and heading follow the vehicle, so the
+    // hold does not fight the turn
+    if (_turning) {
+        _hold_fwd = fwd;
         _hold_diff = diff;
     }
 
@@ -398,29 +407,29 @@ bool AR_HillHoldControl::update_stopped(float cruise_speed, float cruise_throttl
 }
 
 // call after update_stopped with the mode's desired turn rate (rad/s)
-// and steering output (-1 to +1).  While holding with no turn
-// requested the steering is replaced with the output that holds the
-// heading.  A turn request suspends the heading hold
+// and steering output (-1 to +1).  A turn request suspends the hold
+// until the rotation has stopped.  With the heading hold option set,
+// the steering is otherwise replaced with the output that holds the heading
 void AR_HillHoldControl::update_steering(float desired_turn_rate, float &steering_out)
 {
-    if ((_state != State::HOLDING) || !_use_sides) {
+    if (_state != State::HOLDING) {
         return;
     }
     if (fabsf(desired_turn_rate) > radians(AR_HHC_TURN_RATE_MIN_DEG)) {
-        // turning in place: leave steering to the mode
-        _yaw_hold = false;
+        // turning in place: leave steering to the mode and let the hold point follow
+        _turning = true;
         return;
     }
-    if (!_yaw_hold) {
-        // turn finished: let the mode stop the rotation, then hold the
-        // heading where it stops (from the next update)
-        const float rotation_speed = 0.5f * (_wheel_state.get_side_speed(AR_WheelState::Side::RIGHT) - _wheel_state.get_side_speed(AR_WheelState::Side::LEFT));
-        if (fabsf(rotation_speed) < AR_HHC_YAW_LOCK_SPEED) {
-            _yaw_hold = true;
+    if (_turning) {
+        // turn finished: let the mode stop the rotation, then hold where it stops
+        if (fabsf(AP::ahrs().get_yaw_rate_earth()) < radians(AR_HHC_TURN_STOPPED_DEG)) {
+            _turning = false;
         }
         return;
     }
-    steering_out = _hold_steering;
+    if (_use_sides) {
+        steering_out = _hold_steering;
+    }
 }
 
 // call each loop while the mode asks for a non-zero speed.
