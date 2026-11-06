@@ -111,6 +111,10 @@ void SimRover::update(const struct sitl_input &input)
 
     // common to all rovers
 
+    // add external pushes (SIM_SHOVE_*), e.g. to emulate the pull of a slope
+    Vector3f rot_accel;
+    add_shove_forces(rot_accel, accel_body);
+
     // now in earth frame
     Vector3f accel_earth = dcm * accel_body;
     accel_earth += Vector3f(0, 0, GRAVITY_MSS);
