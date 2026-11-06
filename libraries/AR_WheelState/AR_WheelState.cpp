@@ -72,6 +72,9 @@ void AR_WheelState::update()
     bool all_healthy = true;
     float speed_sum = 0.0f;
     float distance_sum = 0.0f;
+    uint8_t side_count[2] {};
+    float side_speed_sum[2] {};
+    float side_distance_sum[2] {};
 
     for (uint8_t i = 0; i < _wheel_encoder.num_sensors(); i++) {
         if (!_wheel_encoder.enabled(i)) {
@@ -97,6 +100,15 @@ void AR_WheelState::update()
 
         speed_sum += _wheel_speed[i];
         distance_sum += _wheel_distance[i];
+
+        // +ve Y offset is the right side, -ve the left; centred wheels count for neither
+        const float pos_y = _wheel_encoder.get_pos_offset(i).y;
+        if (!is_zero(pos_y)) {
+            const uint8_t side = is_positive(pos_y) ? uint8_t(Side::RIGHT) : uint8_t(Side::LEFT);
+            side_count[side]++;
+            side_speed_sum[side] += _wheel_speed[i];
+            side_distance_sum[side] += _wheel_distance[i];
+        }
     }
 
     _num_wheels = num_wheels;
@@ -109,7 +121,25 @@ void AR_WheelState::update()
         _mean_distance = 0.0f;
     }
 
+    for (uint8_t s = 0; s < 2; s++) {
+        _side_count[s] = side_count[s];
+        _side_speed[s] = (side_count[s] > 0) ? side_speed_sum[s] / side_count[s] : _mean_speed;
+        _side_distance[s] = (side_count[s] > 0) ? side_distance_sum[s] / side_count[s] : _mean_distance;
+    }
+
     update_standstill(now_ms);
+}
+
+// mean distance (m) of the wheels on one side
+float AR_WheelState::get_side_distance(Side side) const
+{
+    return _side_distance[uint8_t(side)];
+}
+
+// mean filtered speed (m/s) of the wheels on one side
+float AR_WheelState::get_side_speed(Side side) const
+{
+    return _side_speed[uint8_t(side)];
 }
 
 // filtered wheel speed in m/s (+ve forward) for one wheel

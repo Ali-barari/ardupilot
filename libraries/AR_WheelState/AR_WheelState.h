@@ -60,6 +60,20 @@ public:
     // mean distance travelled by all wheels in metres (+ve forward)
     float get_mean_distance() const { return _mean_distance; }
 
+    // vehicle sides, from the sign of each encoder's WENCn_POS_Y
+    enum class Side : uint8_t {
+        LEFT = 0,
+        RIGHT = 1,
+    };
+
+    // true if there is at least one wheel on each side
+    bool have_sides() const { return _side_count[0] > 0 && _side_count[1] > 0; }
+
+    // mean distance (m) and filtered speed (m/s) of the wheels on one side.
+    // Fall back to the mean of all wheels if that side has no wheels
+    float get_side_distance(Side side) const;
+    float get_side_speed(Side side) const;
+
     // true if the wheels have been at rest for WST_STILL_TIME
     bool is_stationary() const { return _stationary; }
 
@@ -91,6 +105,9 @@ private:
     bool _healthy;
     float _mean_speed;
     float _mean_distance;
+    uint8_t _side_count[2];
+    float _side_speed[2];
+    float _side_distance[2];
     uint32_t _last_update_us;
 
     // standstill state
