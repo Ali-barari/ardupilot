@@ -18,6 +18,10 @@
 #include "AP_MotorsUGV.h"
 #include <AP_Relay/AP_Relay.h>
 
+// throttle (in percent) below which the direction relay of a brushed
+// motor is not switched, to stop it chattering around zero output
+#define AP_MOTORS_UGV_RELAY_MIN_THROTTLE 0.5f
+
 #define SERVO_MAX 4500  // This value represents 45 degrees and is just an arbitrary representation of servo max travel.
 
 extern const AP_HAL::HAL& hal;
@@ -1020,7 +1024,12 @@ void AP_MotorsUGV::output_throttle(SRV_Channel::Aux_servo_function_t function, f
                 relay_function = AP_Relay_Params::FUNCTION::BRUSHED_REVERSE_4;
                 break;
         }
-        relay->set(relay_function, relay_high);
+        // leave the direction relay as it is while the throttle is too
+        // small to matter, so a controller output hovering around zero
+        // does not make the relay chatter
+        if (fabsf(throttle) >= AP_MOTORS_UGV_RELAY_MIN_THROTTLE) {
+            relay->set(relay_function, relay_high);
+        }
 
         // invert the output to always have positive value calculated by calc_pwm
         throttle = reverse_multiplier * fabsf(throttle);
