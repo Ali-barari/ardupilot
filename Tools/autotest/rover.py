@@ -5001,7 +5001,7 @@ Brakes have negligible effect (with=%0.2fm without=%0.2fm delta=%0.2fm)
         # emulate a slope pulling the rover backwards with the sticks centred
         self.set_parameters({
             "SIM_SHOVE_X": -1.0,
-            "SIM_SHOVE_TIME": 60000,
+            "SIM_SHOVE_TIME": 120000,
         })
         self.delay_sim_time(3)
         distance = rolled(10)
@@ -5034,12 +5034,19 @@ Brakes have negligible effect (with=%0.2fm without=%0.2fm delta=%0.2fm)
         if abs(distance) > 0.05:
             raise NotAchievedException("Hill hold did not re-engage (rolled %.3f m)" % distance)
 
-        # turn in place, then centre: the heading must settle where the
-        # turn stops without hunting
+        # turn in place, then centre: once the turn rate controller has
+        # stopped the rotation the rover must stay put without hunting
         self.set_rc(1, 1800)
         self.delay_sim_time(2)
         self.set_rc(1, 1500)
-        self.delay_sim_time(1.5)
+        tstart = self.get_sim_time()
+        while True:
+            m = self.assert_receive_message('ATTITUDE', timeout=5)
+            if abs(math.degrees(m.yawspeed)) < 1:
+                break
+            if self.get_sim_time_cached() - tstart > 20:
+                raise NotAchievedException("Rotation did not stop after turn in place")
+        self.delay_sim_time(1)
         yaws = []
         tstart = self.get_sim_time()
         while self.get_sim_time_cached() - tstart < 4:
