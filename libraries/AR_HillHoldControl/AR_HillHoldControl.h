@@ -17,14 +17,21 @@
   Hill Hold Control for ground vehicles.
 
   When the vehicle's mode asks for zero speed and the wheels have nearly
-  stopped, the mean wheel distance is captured as a hold point and a PID
-  on the distance from that point (plus optional pitch feedforward)
-  produces the throttle that holds the vehicle there.  This stops back
-  drivable drive trains rolling down a slope.  When a speed is requested
-  again the holding throttle is faded out over HHC_REL_TIME so the
-  vehicle does not drop back before the speed controller takes over.
+  stopped, the wheel positions are captured as a hold point and the
+  vehicle is held there, so back-drivable drive trains do not roll down
+  a slope.  Skid-steer vehicles are held per side, which also holds the
+  heading; other vehicles are held on the mean of all wheels.
 
-  Uses the wheel encoders only; it does not need GPS or an EKF position.
+  For each side a controller turns the distance from the hold point
+  (P and I) and the wheel speed (damping) into a corrective speed, which
+  is scaled to throttle with CRUISE_THROTTLE / CRUISE_SPEED.  Optional
+  pitch feedforward, dead-zone compensation (HHC_MIN) and direction
+  hysteresis (HHC_HYST, to stop direction relays chattering) are added.
+
+  When a speed is requested again the holding throttle is faded out over
+  HHC_REL_TIME so the vehicle does not drop back before the speed
+  controller takes over.  Uses the wheel encoders only; it does not need
+  GPS or an EKF position.
  */
 #pragma once
 
@@ -33,18 +40,7 @@
 #if AR_HILLHOLDCONTROL_ENABLED
 
 #include <AP_Param/AP_Param.h>
-#include <AC_PID/AC_PID.h>
 #include <AR_WheelState/AR_WheelState.h>
-
-// position hold PID defaults.  The PID converts the distance from the
-// hold point (m) to a corrective speed (m/s), which is turned into
-// throttle using CRUISE_THROTTLE / CRUISE_SPEED so the gains suit any
-// vehicle that has its cruise values set
-#define AR_HHC_POS_P        3.0f
-#define AR_HHC_POS_I        3.0f
-#define AR_HHC_POS_D        1.0f
-#define AR_HHC_POS_IMAX     5.0f
-#define AR_HHC_POS_FILT_D   5.0f
 
 class AR_HillHoldControl {
 public:
@@ -71,6 +67,12 @@ public:
     // Returns true while holding
     bool update_stopped(float cruise_speed, float cruise_throttle, float dt, float &throttle_out);
 
+    // call after update_stopped with the mode's desired turn rate (rad/s)
+    // and steering output (-1 to +1).  While holding with no turn
+    // requested the steering is replaced with the output that holds the
+    // heading.  A turn request suspends the heading hold
+    void update_steering(float desired_turn_rate, float &steering_out);
+
     // call each loop while the mode asks for a non-zero speed.
     // throttle_out holds the speed controller's output (-100 to +100);
     // the fading holding throttle is added to it while releasing
@@ -83,38 +85,43 @@ public:
 
 private:
 
+    // the controller for one side of the vehicle, or for the whole
+    // vehicle if it has no sides
+    struct SideHold {
+        float integrator;   // corrective speed from the I term (m/s)
+        int8_t direction;   // direction of the last non-zero output (+1, -1), 0 if none
+        float output;       // last output (-1 to +1)
+    };
+
     // true if enabled, armed and the wheel encoders are healthy
     bool can_run() const;
 
     // change state
     void set_state(State new_state);
 
-    // start holding at the current wheel position, preloading the I term
+    // start holding at the current wheel position
     void start_hold(uint32_t now_ms, float throttle_per_speed, float ff);
 
+    // run one side's controller and return its throttle (-1 to +1)
+    float update_side(SideHold &side, float error, float speed, float throttle_per_speed, float ff, float dt);
+
     // write the HHC log message
-    void write_log(float error, float ff, float out);
+    void write_log(float error_fwd, float error_yaw, float ff);
 
     // parameters
     AP_Int8 _enable;
-    AC_PID _pid{AC_PID::Defaults{
-        .p         = AR_HHC_POS_P,
-        .i         = AR_HHC_POS_I,
-        .d         = AR_HHC_POS_D,
-        .ff        = 0.0f,
-        .imax      = AR_HHC_POS_IMAX,
-        .filt_T_hz = 0.0f,
-        .filt_E_hz = 0.0f,
-        .filt_D_hz = AR_HHC_POS_FILT_D,
-        .srmax     = 0,
-        .srtau     = 1.0
-    }};
     AP_Float _slope_ff;         // throttle % per unit sin(pitch)
     AP_Float _thr_max;          // maximum holding throttle %
     AP_Float _deadband;         // distance error deadband in m
     AP_Float _engage_speed;     // hold engages below this mean wheel speed in m/s
     AP_Float _release_time;     // holding throttle fade-out time in s
     AP_Float _timeout;          // give up after holding this long in s, 0 = never
+    AP_Float _kp;               // corrective speed per m from the hold point
+    AP_Float _ki;               // corrective speed per m.s from the hold point
+    AP_Float _imax;             // I term limit in m/s
+    AP_Float _damp;             // corrective speed per m/s of wheel speed
+    AP_Float _thr_min;          // dead-zone compensation, throttle %
+    AP_Float _dir_hyst;         // direction change hysteresis, throttle %
 
     const AR_WheelState &_wheel_state;
 
@@ -122,17 +129,21 @@ private:
     State _state = State::OFF;
     uint32_t _last_update_ms;   // last time update_stopped or update_moving ran
     uint32_t _hold_start_ms;    // time the hold started
-    float _hold_distance;       // mean wheel distance at the hold point
+    float _hold_fwd;            // mean wheel distance at the hold point
+    float _hold_diff;           // half the right minus left distance at the hold point
     int8_t _coast_dir;          // direction the wheels were still turning when the hold engaged (+1, -1), 0 once locked
-    float _hold_output;         // last holding throttle (-1 to +1)
-    bool _output_limited;       // true if the last output hit HHC_MAX
+    bool _use_sides;            // true if holding each side separately
+    bool _yaw_hold;             // true if the heading is being held (no turn requested)
+    SideHold _side[2];          // left/right, or [0] for the whole vehicle
+    float _hold_output;         // mean holding throttle (-1 to +1)
+    float _hold_steering;       // steering that holds the heading (-1 to +1)
     uint32_t _release_start_ms; // time the release started
     float _release_output;      // holding throttle when the release started (-1 to +1)
     uint32_t _last_log_ms;      // last time the HHC message was logged
 
     // last steady hold, used to preload the next hold on the same slope
     bool _steady_valid;         // true once a steady hold has been seen
-    float _steady_output;       // holding throttle of the last steady hold (-1 to +1)
+    float _steady_output;       // mean holding throttle of the last steady hold (-1 to +1)
     float _steady_pitch;        // pitch of the last steady hold in radians
 };
 
