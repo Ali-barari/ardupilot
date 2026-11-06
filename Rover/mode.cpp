@@ -369,6 +369,10 @@ bool Mode::stop_vehicle()
     if (!stopped) {
         steering_out = attitude_control.get_steering_out_rate(0.0, g2.motors.limit.steer_left, g2.motors.limit.steer_right, rover.G_Dt);
     }
+#if AR_HILLHOLDCONTROL_ENABLED
+    // while holding, hold the heading too
+    g2.hill_hold.update_steering(0.0f, steering_out);
+#endif
     g2.motors.set_steering(steering_out * 4500.0);
 
     // return true once stopped

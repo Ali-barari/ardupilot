@@ -24,6 +24,7 @@ void ModeAcro::update()
     }
 
     float steering_out;
+    float target_turn_rate = 0.0f;
 
     // handle sailboats
     if (!is_zero(desired_steering)) {
@@ -40,7 +41,7 @@ void ModeAcro::update()
                                                                  rover.G_Dt);
     } else {
         // convert pilot steering input to desired turn rate in radians/sec
-        const float target_turn_rate = (desired_steering / 4500.0f) * radians(g2.acro_turn_rate);
+        target_turn_rate = (desired_steering / 4500.0f) * radians(g2.acro_turn_rate);
 
         // run steering turn rate controller and throttle controller
         steering_out = attitude_control.get_steering_out_rate(target_turn_rate,
@@ -48,6 +49,11 @@ void ModeAcro::update()
                                                               g2.motors.limit.steer_right,
                                                               rover.G_Dt);
     }
+
+#if AR_HILLHOLDCONTROL_ENABLED
+    // while holding with no turn requested, hold the heading too
+    g2.hill_hold.update_steering(target_turn_rate, steering_out);
+#endif
 
     set_steering(steering_out * 4500.0f);
 }
