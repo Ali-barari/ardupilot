@@ -1,0 +1,12 @@
+#pragma once
+
+#include <AP_HAL/AP_HAL_Boards.h>
+#include <AR_WheelState/AR_WheelState_config.h>
+
+#ifndef AR_HILLHOLDCONTROL_ENABLED
+#define AR_HILLHOLDCONTROL_ENABLED AR_WHEELSTATE_ENABLED
+#endif
+
+#if AR_HILLHOLDCONTROL_ENABLED && !AR_WHEELSTATE_ENABLED
+#error "AR_HILLHOLDCONTROL_ENABLED requires AR_WHEELSTATE_ENABLED"
+#endif
