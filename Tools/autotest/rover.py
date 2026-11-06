@@ -4973,7 +4973,11 @@ Brakes have negligible effect (with=%0.2fm without=%0.2fm delta=%0.2fm)
                                         model=model,
                                         defaults_filepath=self.model_defaults_filepath(model))
         self.set_parameters({
+            # one encoder per side, so the rover is held per side
             "WENC_TYPE": 10,
+            "WENC_POS_Y": -0.2,
+            "WENC2_TYPE": 10,
+            "WENC2_POS_Y": 0.2,
             "HHC_ENABLE": 1,
             # match the skid-steer model: 4 m/s at full throttle
             "CRUISE_SPEED": 3,
