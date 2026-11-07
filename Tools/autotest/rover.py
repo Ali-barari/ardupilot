@@ -5016,8 +5016,8 @@ Brakes have negligible effect (with=%0.2fm without=%0.2fm delta=%0.2fm)
         if distance < 0.5:
             raise NotAchievedException("Rover did not drive uphill after release (%.3f m)" % distance)
 
-        # sticks centred again: the hold re-engages with the I term preloaded
-        # from the speed controller, so the rover must not sag back
+        # sticks centred again: the hold re-engages.  With no I term the
+        # rover sags back until the stiffness balances the slope, then stays
         self.set_rc(3, 1500)
         tstart = self.get_sim_time()
         peak = None
@@ -5027,12 +5027,46 @@ Brakes have negligible effect (with=%0.2fm without=%0.2fm delta=%0.2fm)
             peak = d if peak is None else max(peak, d)
             sag = max(sag, peak - d)
         self.progress("Hill hold re-engaged: sagged %.3f m after stopping" % sag)
-        if sag > 0.01:
+        if sag > 0.15:
             raise NotAchievedException("Hill hold sagged %.3f m on re-engage" % sag)
         distance = rolled(5)
         self.progress("Hill hold re-engaged: rolled %.3f m in 5 s" % distance)
         if abs(distance) > 0.05:
             raise NotAchievedException("Hill hold did not re-engage (rolled %.3f m)" % distance)
+
+        # a push: the hold must fight it and settle back, not oscillate
+        start = wheel_distance()
+        self.set_parameters({
+            "SIM_SHOVE_X": 3.0,
+            "SIM_SHOVE_TIME": 500,
+        })
+        self.delay_sim_time(1)
+        self.set_parameters({
+            "SIM_SHOVE_X": -1.0,
+            "SIM_SHOVE_TIME": 120000,
+        })
+        self.delay_sim_time(4)
+        # the wheel speed must have died away and stay that way
+        tstart = self.get_sim_time()
+        reversals = 0
+        last_sign = 0
+        prev = wheel_distance()
+        while self.get_sim_time_cached() - tstart < 5:
+            self.delay_sim_time(0.2)
+            d = wheel_distance()
+            step = d - prev
+            prev = d
+            if abs(step) > 0.002:
+                sign = 1 if step > 0 else -1
+                if last_sign != 0 and sign != last_sign:
+                    reversals += 1
+                last_sign = sign
+        offset = wheel_distance() - start
+        self.progress("After push: %.3f m from the hold, %u reversals" % (offset, reversals))
+        if reversals > 1:
+            raise NotAchievedException("Hill hold oscillates after a push (%u reversals)" % reversals)
+        if abs(offset) > 0.05:
+            raise NotAchievedException("Hill hold did not return after a push (%.3f m)" % offset)
 
         # turn in place, then centre: once the turn rate controller has
         # stopped the rotation the rover must stay put without hunting
