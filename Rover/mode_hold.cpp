@@ -12,7 +12,7 @@ void ModeHold::update()
 #if AR_HILLHOLDCONTROL_ENABLED
     else {
         // stop the vehicle rolling down a slope
-        g2.hill_hold.update_stopped(g.speed_cruise, g.throttle_cruise * 0.01f, rover.G_Dt, throttle);
+        g2.hill_hold.update_stopped(g.speed_cruise, g.throttle_cruise * 0.01f, throttle);
         g2.hill_hold.update_steering(0.0f, steering);
     }
 #endif

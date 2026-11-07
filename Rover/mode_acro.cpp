@@ -51,8 +51,12 @@ void ModeAcro::update()
     }
 
 #if AR_HILLHOLDCONTROL_ENABLED
-    // while holding with no turn requested, hold the heading too
-    g2.hill_hold.update_steering(target_turn_rate, steering_out);
+    // while holding with no turn requested the hold sets the steering.  A
+    // skid-steer vehicle held in place, or lifted, cannot follow small turn
+    // rate corrections, so stop the turn rate controller winding up
+    if (g2.hill_hold.update_steering(target_turn_rate, steering_out)) {
+        attitude_control.get_steering_rate_pid().reset_I();
+    }
 #endif
 
     set_steering(steering_out * 4500.0f);

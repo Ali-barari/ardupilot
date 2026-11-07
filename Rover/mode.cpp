@@ -315,7 +315,7 @@ void Mode::calc_throttle(float target_speed, bool avoidance_enabled)
             throttle_out = 100.0f * attitude_control.get_throttle_out_stop(g2.motors.limit.throttle_lower, g2.motors.limit.throttle_upper, g.speed_cruise, g.throttle_cruise * 0.01f, rover.G_Dt, stopped);
 #if AR_HILLHOLDCONTROL_ENABLED
             // hold the vehicle in place on slopes once it has nearly stopped
-            g2.hill_hold.update_stopped(g.speed_cruise, g.throttle_cruise * 0.01f, rover.G_Dt, throttle_out);
+            g2.hill_hold.update_stopped(g.speed_cruise, g.throttle_cruise * 0.01f, throttle_out);
 #endif
         } else {
             bool motor_lim_low = g2.motors.limit.throttle_lower || attitude_control.pitch_limited();
@@ -323,7 +323,7 @@ void Mode::calc_throttle(float target_speed, bool avoidance_enabled)
             throttle_out = 100.0f * attitude_control.get_throttle_out_speed(target_speed, motor_lim_low, motor_lim_high, g.speed_cruise, g.throttle_cruise * 0.01f, rover.G_Dt);
 #if AR_HILLHOLDCONTROL_ENABLED
             // fade out any holding throttle while the speed controller takes over
-            g2.hill_hold.update_moving(target_speed, rover.G_Dt, throttle_out);
+            g2.hill_hold.update_moving(target_speed, throttle_out);
 #endif
         }
 
@@ -352,7 +352,7 @@ bool Mode::stop_vehicle()
         throttle_out = 100.0f * attitude_control.get_throttle_out_stop(g2.motors.limit.throttle_lower, g2.motors.limit.throttle_upper, g.speed_cruise, g.throttle_cruise * 0.01f, rover.G_Dt, stopped);
 #if AR_HILLHOLDCONTROL_ENABLED
         // hold the vehicle in place on slopes once it has nearly stopped
-        if (g2.hill_hold.update_stopped(g.speed_cruise, g.throttle_cruise * 0.01f, rover.G_Dt, throttle_out)) {
+        if (g2.hill_hold.update_stopped(g.speed_cruise, g.throttle_cruise * 0.01f, throttle_out)) {
             stopped = true;
         }
 #endif
@@ -370,7 +370,7 @@ bool Mode::stop_vehicle()
         steering_out = attitude_control.get_steering_out_rate(0.0, g2.motors.limit.steer_left, g2.motors.limit.steer_right, rover.G_Dt);
     }
 #if AR_HILLHOLDCONTROL_ENABLED
-    // while holding, hold the heading too
+    // while holding, the hold sets the steering
     g2.hill_hold.update_steering(0.0f, steering_out);
 #endif
     g2.motors.set_steering(steering_out * 4500.0);
