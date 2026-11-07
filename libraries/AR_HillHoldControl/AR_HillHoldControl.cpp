@@ -20,7 +20,6 @@
 #include <AP_HAL/AP_HAL.h>
 #include <AP_AHRS/AP_AHRS.h>
 #include <AP_Logger/AP_Logger.h>
-#include <APM_Control/AR_AttitudeControl.h>
 #include <GCS_MAVLink/GCS.h>
 
 extern const AP_HAL::HAL& hal;
@@ -32,16 +31,6 @@ extern const AP_HAL::HAL& hal;
 // maximum rate of the HHC log message
 #define AR_HHC_LOG_INTERVAL_MS      40
 
-// a hold is steady once it has run this long with the wheels at rest
-// near the hold point; its throttle is then remembered for the next hold
-#define AR_HHC_STEADY_TIME_MS       1000
-
-// pitch difference within which the next hold is assumed to be on the same slope
-#define AR_HHC_SAME_SLOPE_DEG       2.0f
-
-// time constant in s with which an I term too small to turn the wheels is bled away
-#define AR_HHC_BLEED_TC             1.0f
-
 // a desired turn rate above this suspends the heading hold
 #define AR_HHC_TURN_RATE_MIN_DEG    1.0f
 
@@ -50,6 +39,10 @@ extern const AP_HAL::HAL& hal;
 // request if the stop controller cannot stop the vehicle (e.g. on a slope)
 #define AR_HHC_TURN_STOPPED_DEG     2.0f
 #define AR_HHC_ENGAGE_TIMEOUT_MS    1000
+
+// the hold point follows a vehicle still coasting to a stop for at most
+// this long, so it cannot follow a vehicle rolling down a slope
+#define AR_HHC_COAST_MAX_MS         500
 
 const AP_Param::GroupInfo AR_HillHoldControl::var_info[] = {
 
@@ -60,11 +53,11 @@ const AP_Param::GroupInfo AR_HillHoldControl::var_info[] = {
     // @User: Standard
     AP_GROUPINFO_FLAGS("ENABLE", 1, AR_HillHoldControl, _enable, 0, AP_PARAM_FLAG_ENABLE),
 
-    // 2 was the POS_ PID group, replaced by P, I, IMAX and DAMP
+    // 2 was the POS_ PID group, replaced by P and DAMP
 
     // @Param: SLOPE_FF
     // @DisplayName: Hill hold slope feedforward
-    // @Description: Throttle added per unit of sin(pitch) while holding, so the hold pushes against the slope before the vehicle moves. 0 holds using the wheel encoders only
+    // @Description: Throttle added per unit of sin(pitch) while holding, so the hold pushes against the slope instead of sagging downhill until the stiffness balances it. 0 holds using the wheel encoders only. A steady hold's Out / sin(Pitch) * 100 from the HHC log gives a starting value
     // @Units: %
     // @Range: 0 100
     // @Increment: 1
@@ -122,24 +115,9 @@ const AP_Param::GroupInfo AR_HillHoldControl::var_info[] = {
     // @Range: 0 100
     // @Increment: 0.5
     // @User: Standard
-    AP_GROUPINFO("P", 9, AR_HillHoldControl, _kp, 10.0f),
+    AP_GROUPINFO("P", 9, AR_HillHoldControl, _kp, 6.0f),
 
-    // @Param: I
-    // @DisplayName: Hill hold I gain
-    // @Description: Builds up the corrective speed (m/s, scaled to throttle by CRUISE_THROTTLE / CRUISE_SPEED) needed to hold the vehicle on a slope, per metre-second from the hold point
-    // @Range: 0 100
-    // @Increment: 0.5
-    // @User: Standard
-    AP_GROUPINFO("I", 10, AR_HillHoldControl, _ki, 5.0f),
-
-    // @Param: IMAX
-    // @DisplayName: Hill hold I term maximum
-    // @Description: Maximum corrective speed the I term may build up. HHC_MAX also limits the final throttle
-    // @Units: m/s
-    // @Range: 0 10
-    // @Increment: 0.1
-    // @User: Advanced
-    AP_GROUPINFO("IMAX", 11, AR_HillHoldControl, _imax, 5.0f),
+    // 10 and 11 were I and IMAX, removed: the I term made the hold oscillate
 
     // @Param: DAMP
     // @DisplayName: Hill hold damping
@@ -151,7 +129,7 @@ const AP_Param::GroupInfo AR_HillHoldControl::var_info[] = {
 
     // @Param: MIN
     // @DisplayName: Hill hold dead-zone compensation
-    // @Description: Throttle added in the direction of the correction whenever the vehicle is outside the deadband, so the hold produces torque straight away on motor drivers that need a minimum duty to turn the wheels. An I term below this value is bled away while inside the deadband
+    // @Description: Throttle added in the direction of the correction whenever the vehicle is outside the deadband, so the hold produces torque straight away on motor drivers that need a minimum duty to turn the wheels
     // @Units: %
     // @Range: 0 20
     // @Increment: 0.5
@@ -207,13 +185,8 @@ void AR_HillHoldControl::set_state(State new_state)
 #endif
 }
 
-// start holding at the current wheel position.  The I terms are
-// preloaded so the hold starts with the torque the slope needs instead of
-// zero (bumpless transfer), minus whatever the slope feedforward covers:
-// - the last steady hold's throttle if the pitch is about the same (same slope)
-// - otherwise the speed controller's I term, which holds part of the
-//   slope and friction throttle while the vehicle slows down
-void AR_HillHoldControl::start_hold(uint32_t now_ms, float throttle_per_speed, float ff)
+// start holding at the current wheel position
+void AR_HillHoldControl::start_hold(uint32_t now_ms, bool coasting)
 {
     _use_sides = _wheel_state.have_sides() && ((_options & uint8_t(Option::HOLD_HEADING)) != 0);
     _hold_fwd = _wheel_state.get_mean_distance();
@@ -224,22 +197,9 @@ void AR_HillHoldControl::start_hold(uint32_t now_ms, float throttle_per_speed, f
     // Remember the direction so the hold point can follow it until the
     // wheels stop, and the vehicle is held where it stops
     const float speed = _wheel_state.get_mean_speed();
-    _coast_dir = _wheel_state.is_stationary() ? 0 : (is_negative(speed) ? -1 : 1);
+    _coast_dir = (!coasting || _wheel_state.is_stationary()) ? 0 : (is_negative(speed) ? -1 : 1);
 
-    float expected_output = 0.0f;
-    const float pitch = AP::ahrs().get_pitch();
-    if (_steady_valid && (fabsf(pitch - _steady_pitch) < radians(AR_HHC_SAME_SLOPE_DEG))) {
-        expected_output = _steady_output;
-    } else {
-        const AR_AttitudeControl *attitude_control = AR_AttitudeControl::get_singleton();
-        if ((attitude_control != nullptr) && attitude_control->speed_control_active()) {
-            expected_output = attitude_control->get_throttle_speed_pid_info().I;
-        }
-    }
-    const float imax = MAX(_imax, 0.0f);
-    const float preload = is_positive(throttle_per_speed) ? constrain_float((expected_output - ff) / throttle_per_speed, -imax, imax) : 0.0f;
     for (SideHold &side : _side) {
-        side.integrator = preload;
         side.direction = 0;
         side.output = 0.0f;
     }
@@ -248,7 +208,7 @@ void AR_HillHoldControl::start_hold(uint32_t now_ms, float throttle_per_speed, f
 }
 
 // run one side's controller and return its throttle (-1 to +1)
-float AR_HillHoldControl::update_side(SideHold &side, float error, float speed, float throttle_per_speed, float ff, float dt)
+float AR_HillHoldControl::update_side(SideHold &side, float error, float speed, float throttle_per_speed, float ff)
 {
     // distance from the hold point outside the deadband
     const float deadband = MAX(_deadband, 0.0f);
@@ -259,28 +219,16 @@ float AR_HillHoldControl::update_side(SideHold &side, float error, float speed, 
         error_db = error + deadband;
     }
 
-    // I term, not winding further while the output is saturated in that direction
-    const float out_max = constrain_float(_thr_max, 0.0f, 100.0f) * 0.01f;
-    const bool saturated = fabsf(side.output) >= out_max;
-    if (!(saturated && (error_db * side.output) > 0.0f)) {
-        side.integrator += _ki * error_db * dt;
-    }
-    const float imax = MAX(_imax, 0.0f);
-    side.integrator = constrain_float(side.integrator, -imax, imax);
-
-    // stiffness, I term and damping give a corrective speed, scaled to
-    // throttle, plus slope feedforward
-    float out = (_kp * error_db + side.integrator - _damp * speed) * throttle_per_speed + ff;
+    // stiffness and damping give a corrective speed, scaled to throttle,
+    // plus slope feedforward.  There is no I term: on a slope the vehicle
+    // settles where the stiffness (or HHC_SLOPE_FF) balances the slope
+    float out = (_kp * error_db - _damp * speed) * throttle_per_speed + ff;
 
     const float thr_min = MAX(_thr_min, 0.0f) * 0.01f;
     if (!is_zero(error_db)) {
         // outside the deadband: start from the drivers' minimum working
         // duty so the correction produces torque straight away
         out += is_positive(error_db) ? thr_min : -thr_min;
-    } else if (fabsf(out) < thr_min) {
-        // inside the deadband with an output too small to turn the
-        // wheels: bleed the I term away instead of holding a useless current
-        side.integrator *= MAX(1.0f - dt / AR_HHC_BLEED_TC, 0.0f);
     }
 
     // only change direction once the output clearly asks for it
@@ -292,6 +240,7 @@ float AR_HillHoldControl::update_side(SideHold &side, float error, float speed, 
         side.direction = dir;
     }
 
+    const float out_max = constrain_float(_thr_max, 0.0f, 100.0f) * 0.01f;
     side.output = constrain_float(out, -out_max, out_max);
     return side.output;
 }
@@ -301,15 +250,13 @@ float AR_HillHoldControl::update_side(SideHold &side, float error, float speed, 
 // with the holding throttle while holding.  cruise_speed (m/s) and
 // cruise_throttle (0 to 1) scale the corrective speed to throttle.
 // Returns true while holding
-bool AR_HillHoldControl::update_stopped(float cruise_speed, float cruise_throttle, float dt, float &throttle_out)
+bool AR_HillHoldControl::update_stopped(float cruise_speed, float cruise_throttle, float &throttle_out)
 {
     const uint32_t now_ms = AP_HAL::millis();
 
     if (!can_run()) {
         set_state(State::OFF);
         if (!hal.util->get_soft_armed()) {
-            // the slope may be different when next armed
-            _steady_valid = false;
         }
         _last_update_ms = now_ms;
         return false;
@@ -348,7 +295,9 @@ bool AR_HillHoldControl::update_stopped(float cruise_speed, float cruise_throttl
         if (!stopped && ((now_ms - _request_ms) < AR_HHC_ENGAGE_TIMEOUT_MS)) {
             return false;
         }
-        start_hold(now_ms, throttle_per_speed, ff);
+        // follow the coast only if the stop controller has nearly stopped
+        // the vehicle, not if it engaged because the vehicle kept moving
+        start_hold(now_ms, stopped);
         FALLTHROUGH;
     }
 
@@ -373,10 +322,12 @@ bool AR_HillHoldControl::update_stopped(float cruise_speed, float cruise_throttl
     const float diff = _use_sides ? 0.5f * (_wheel_state.get_side_distance(AR_WheelState::Side::RIGHT) - _wheel_state.get_side_distance(AR_WheelState::Side::LEFT)) : 0.0f;
 
     // while still coasting in the direction it was travelling, move the
-    // hold point with the vehicle.  Lock it once the wheels stop or reverse
+    // hold point with the vehicle.  Lock it once the wheels stop or
+    // reverse, or after AR_HHC_COAST_MAX_MS
     if (_coast_dir != 0) {
         const float speed = _wheel_state.get_mean_speed();
-        if (_wheel_state.is_stationary() || ((speed * _coast_dir) <= 0.0f)) {
+        if (_wheel_state.is_stationary() || ((speed * _coast_dir) <= 0.0f) ||
+            ((now_ms - _hold_start_ms) > AR_HHC_COAST_MAX_MS)) {
             _coast_dir = 0;
         } else if (((fwd - _hold_fwd) * _coast_dir) > 0.0f) {
             _hold_fwd = fwd;
@@ -388,26 +339,16 @@ bool AR_HillHoldControl::update_stopped(float cruise_speed, float cruise_throttl
     const float error_yaw = _hold_diff - diff;
 
     if (_use_sides) {
-        const float out_left = update_side(_side[0], error_fwd - error_yaw, _wheel_state.get_side_speed(AR_WheelState::Side::LEFT), throttle_per_speed, ff, dt);
-        const float out_right = update_side(_side[1], error_fwd + error_yaw, _wheel_state.get_side_speed(AR_WheelState::Side::RIGHT), throttle_per_speed, ff, dt);
+        const float out_left = update_side(_side[0], error_fwd - error_yaw, _wheel_state.get_side_speed(AR_WheelState::Side::LEFT), throttle_per_speed, ff);
+        const float out_right = update_side(_side[1], error_fwd + error_yaw, _wheel_state.get_side_speed(AR_WheelState::Side::RIGHT), throttle_per_speed, ff);
         _hold_output = 0.5f * (out_left + out_right);
         _hold_steering = 0.5f * (out_left - out_right);
     } else {
-        _hold_output = update_side(_side[0], error_fwd, _wheel_state.get_mean_speed(), throttle_per_speed, ff, dt);
+        _hold_output = update_side(_side[0], error_fwd, _wheel_state.get_mean_speed(), throttle_per_speed, ff);
         _hold_steering = 0.0f;
     }
 
     throttle_out = _hold_output * 100.0f;
-
-    // remember the throttle of a steady hold for the next hold on this slope
-    const float deadband = MAX(_deadband, 0.0f);
-    if (((now_ms - _hold_start_ms) > AR_HHC_STEADY_TIME_MS) && _wheel_state.is_stationary() &&
-        (fabsf(error_fwd) <= MAX(2.0f * deadband, 0.01f)) &&
-        (fabsf(_hold_output) < constrain_float(_thr_max, 0.0f, 100.0f) * 0.01f)) {
-        _steady_valid = true;
-        _steady_output = _hold_output;
-        _steady_pitch = AP::ahrs().get_pitch();
-    }
 
 #if HAL_LOGGING_ENABLED
     write_log(error_fwd, error_yaw, ff);
@@ -418,22 +359,26 @@ bool AR_HillHoldControl::update_stopped(float cruise_speed, float cruise_throttl
 // call each loop after update_stopped with the mode's desired turn
 // rate (rad/s) and steering output (-1 to +1).  A turn request
 // releases the hold; it engages again once nothing is requested and the
-// vehicle has stopped moving and rotating.  With the heading hold
-// option set, the steering is replaced with the output that holds the heading
-void AR_HillHoldControl::update_steering(float desired_turn_rate, float &steering_out)
+// vehicle has stopped moving and rotating.  While holding, the steering
+// is replaced with zero, or with the output that holds the heading if
+// the heading hold option is set.  Returns true if the steering was
+// replaced, so the caller can stop its turn rate controller winding up
+bool AR_HillHoldControl::update_steering(float desired_turn_rate, float &steering_out)
 {
     // remembered for the next update_stopped call
     _turn_requested = fabsf(desired_turn_rate) > radians(AR_HHC_TURN_RATE_MIN_DEG);
 
-    if ((_state == State::HOLDING) && _use_sides && !_turn_requested) {
-        steering_out = _hold_steering;
+    if ((_state != State::HOLDING) || _turn_requested) {
+        return false;
     }
+    steering_out = _use_sides ? _hold_steering : 0.0f;
+    return true;
 }
 
 // call each loop while the mode asks for a non-zero speed.
 // throttle_out holds the speed controller's output (-100 to +100);
 // the fading holding throttle is added to it while releasing
-void AR_HillHoldControl::update_moving(float target_speed, float dt, float &throttle_out)
+void AR_HillHoldControl::update_moving(float target_speed, float &throttle_out)
 {
     const uint32_t now_ms = AP_HAL::millis();
 
@@ -512,19 +457,15 @@ void AR_HillHoldControl::write_log(float error_fwd, float error_yaw, float ff)
     // @Field: Pitch: Vehicle pitch
     // @Field: OutL: Left side (or whole vehicle) holding throttle
     // @Field: OutR: Right side holding throttle
-    // @Field: IL: Left side (or whole vehicle) I term
-    // @Field: IR: Right side I term
     // @Field: FF: Slope feedforward throttle
     // @Field: Str: Steering that holds the heading
     // @Field: Out: Mean holding throttle while holding, fading throttle while releasing
-    // @Field: SOut: Throttle of the last steady hold, used to preload the next hold on the same slope. SOut / sin(SPitch) * 100 gives a starting value for HHC_SLOPE_FF
-    // @Field: SPitch: Pitch of the last steady hold
     float out = _hold_output;
     if (_state == State::RELEASING) {
         out = _release_output * (1.0f - constrain_float((now_ms - _release_start_ms) * 0.001f / MAX(_release_time.get(), 0.001f), 0.0f, 1.0f));
     }
-    AP::logger().WriteStreaming("HHC", "TimeUS,St,EF,EY,Spd,Pitch,OutL,OutR,IL,IR,FF,Str,Out,SOut,SPitch",
-                                "s-mmnd--nn----d", "F-0000000000000", "QBfffffffffffff",
+    AP::logger().WriteStreaming("HHC", "TimeUS,St,EF,EY,Spd,Pitch,OutL,OutR,FF,Str,Out",
+                                "s-mmnd-----", "F-000000000", "QBfffffffff",
                                 AP_HAL::micros64(),
                                 (uint8_t)_state,
                                 (double)error_fwd,
@@ -533,13 +474,9 @@ void AR_HillHoldControl::write_log(float error_fwd, float error_yaw, float ff)
                                 (double)degrees(AP::ahrs().get_pitch()),
                                 (double)_side[0].output,
                                 (double)_side[1].output,
-                                (double)_side[0].integrator,
-                                (double)_side[1].integrator,
                                 (double)ff,
                                 (double)_hold_steering,
-                                (double)out,
-                                (double)(_steady_valid ? _steady_output : 0.0f),
-                                (double)(_steady_valid ? degrees(_steady_pitch) : 0.0f));
+                                (double)out);
 }
 #endif  // HAL_LOGGING_ENABLED
 
