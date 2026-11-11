@@ -22,9 +22,11 @@
   a slope.  The vehicle is held on the mean of all wheels and its turn
   rate controller holds the heading; with HHC_OPTIONS bit 0, skid-steer
   vehicles are instead held per side, which also holds the heading.  Any
-  speed or turn request releases the hold, so the mode drives as it
-  would without it; the hold engages only once nothing is requested and
-  the vehicle has stopped moving and rotating.
+  speed request releases the hold, so the mode drives as it would
+  without it; the hold engages only once no speed is requested and the
+  vehicle has stopped.  A turn in place keeps the position hold (so the
+  vehicle does not roll down a slope while turning) and the mode steers;
+  the heading is held where the turn ends.
 
   For each side a PD controller turns the distance from the hold point
   (stiffness) and the wheel speed (damping) into a corrective speed,
@@ -75,9 +77,9 @@ public:
     bool update_stopped(float cruise_speed, float cruise_throttle, float &throttle_out);
 
     // call each loop after update_stopped with the mode's desired turn
-    // rate (rad/s) and steering output (-1 to +1).  A turn request
-    // releases the hold; it engages again once nothing is requested and the
-    // vehicle has stopped moving and rotating.  While holding, the steering
+    // rate (rad/s) and steering output (-1 to +1).  During a turn in place
+    // the hold keeps the position and the mode steers.  Otherwise, while
+    // holding, the steering
     // is replaced with zero, or with the output that holds the heading if
     // the heading hold option is set.  Returns true if the steering was
     // replaced, so the caller can stop its turn rate controller winding up
@@ -117,8 +119,14 @@ private:
     // the hold point may follow the vehicle while it coasts to a stop
     void start_hold(uint32_t now_ms, bool coasting);
 
+    // movement since the hold started: forward distance (m), half the
+    // right minus left distance (m), and each side's speed (m/s)
+    // downhill is +1 (forward), -1 (backward) or 0 (flat).  up is the
+    // distance of the wheel that moved furthest uphill
+    void get_motion(int8_t downhill, float &fwd, float &diff, float side_speed[2], float &up) const;
+
     // run one side's controller and return its throttle (-1 to +1)
-    float update_side(SideHold &side, float error, float speed, float throttle_per_speed, float ff);
+    float update_side(SideHold &side, float error, float speed, float throttle_per_speed, float ff, int8_t downhill);
 
     // write the HHC log message
     void write_log(float error_fwd, float error_yaw, float ff);
@@ -143,9 +151,16 @@ private:
     State _state = State::OFF;
     uint32_t _last_update_ms;   // last time update_stopped or update_moving ran
     uint32_t _hold_start_ms;    // time the hold started
-    float _hold_fwd;            // mean wheel distance at the hold point
-    float _hold_diff;           // half the right minus left distance at the hold point
+    float _hold_fwd;            // forward distance of the hold point from where the hold started
+    float _hold_diff;           // half the right minus left distance of the hold point from where the hold started
+    float _start_wheel[WHEELENCODER_MAX_INSTANCES]; // each wheel's distance when the hold started
+    float _start_mean;          // mean wheel distance when the hold started
+    bool _turn_measure;         // true if the last update measured the movement for a turn (mean of the wheels)
+    uint32_t _slip_start_ms;    // start of the current slip check, 0 if not checking
+    float _slip_start_fwd;      // forward distance when that started
+    float _slip_start_up;       // distance of the wheel furthest uphill when that started
     int8_t _coast_dir;          // direction the wheels were still turning when the hold engaged (+1, -1), 0 once locked
+    int8_t _request_dir = 1;    // direction of the last requested speed (+1, -1)
     bool _use_sides;            // true if holding each side separately
     bool _turn_requested;       // true if the mode asked for a turn on its last update_steering call
     uint32_t _request_ms;       // last time a speed or turn was requested
