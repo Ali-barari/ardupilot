@@ -76,6 +76,9 @@ void AR_WheelState::update()
     float side_speed_sum[2] {};
     float side_distance_sum[2] {};
 
+    for (uint8_t i = 0; i < WHEELENCODER_MAX_INSTANCES; i++) {
+        _wheel_side[i] = -1;
+    }
     for (uint8_t i = 0; i < _wheel_encoder.num_sensors(); i++) {
         if (!_wheel_encoder.enabled(i)) {
             continue;
@@ -105,6 +108,7 @@ void AR_WheelState::update()
         const float pos_y = _wheel_encoder.get_pos_offset(i).y;
         if (!is_zero(pos_y)) {
             const uint8_t side = is_positive(pos_y) ? uint8_t(Side::RIGHT) : uint8_t(Side::LEFT);
+            _wheel_side[i] = side;
             side_count[side]++;
             side_speed_sum[side] += _wheel_speed[i];
             side_distance_sum[side] += _wheel_distance[i];
@@ -140,6 +144,15 @@ float AR_WheelState::get_side_distance(Side side) const
 float AR_WheelState::get_side_speed(Side side) const
 {
     return _side_speed[uint8_t(side)];
+}
+
+// side of one wheel (0 = left, 1 = right), or -1 if centred or not enabled
+int8_t AR_WheelState::get_wheel_side(uint8_t instance) const
+{
+    if (instance >= WHEELENCODER_MAX_INSTANCES) {
+        return -1;
+    }
+    return _wheel_side[instance];
 }
 
 // filtered wheel speed in m/s (+ve forward) for one wheel

@@ -74,6 +74,10 @@ public:
     float get_side_distance(Side side) const;
     float get_side_speed(Side side) const;
 
+    // side of one wheel (0 = left, 1 = right), or -1 if it is centred
+    // or has no enabled encoder
+    int8_t get_wheel_side(uint8_t instance) const;
+
     // true if the wheels have been at rest for WST_STILL_TIME
     bool is_stationary() const { return _stationary; }
 
@@ -99,6 +103,7 @@ private:
     LowPassFilterFloat _speed_filter[WHEELENCODER_MAX_INSTANCES];
     float _wheel_speed[WHEELENCODER_MAX_INSTANCES];
     float _wheel_distance[WHEELENCODER_MAX_INSTANCES];
+    int8_t _wheel_side[WHEELENCODER_MAX_INSTANCES];
 
     // combined state
     uint8_t _num_wheels;
