@@ -5068,11 +5068,17 @@ Brakes have negligible effect (with=%0.2fm without=%0.2fm delta=%0.2fm)
         if abs(offset) > 0.05:
             raise NotAchievedException("Hill hold did not return after a push (%.3f m)" % offset)
 
-        # turn in place, then centre: once the turn rate controller has
-        # stopped the rotation the rover must stay put without hunting
+        # turn in place, then centre: the hold must keep the rover from
+        # rolling down the slope during the turn, and once the turn rate
+        # controller has stopped the rotation it must stay put without hunting
+        loc_before_turn = self.mav.location()
         self.set_rc(1, 1800)
         self.delay_sim_time(2)
         self.set_rc(1, 1500)
+        turn_roll = self.get_distance(loc_before_turn, self.mav.location())
+        self.progress("During turn in place: moved %.3f m" % turn_roll)
+        if turn_roll > 0.1:
+            raise NotAchievedException("Rolled during turn in place (%.3f m)" % turn_roll)
         tstart = self.get_sim_time()
         while True:
             m = self.assert_receive_message('ATTITUDE', timeout=5)
