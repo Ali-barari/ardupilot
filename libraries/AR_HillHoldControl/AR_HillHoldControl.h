@@ -121,9 +121,10 @@ private:
 
     // movement since the hold started: forward distance (m), half the
     // right minus left distance (m), and each side's speed (m/s)
-    // downhill is +1 (forward), -1 (backward) or 0 (flat).  up is the
-    // distance of the wheel that moved furthest uphill
-    void get_motion(int8_t downhill, float &fwd, float &diff, float side_speed[2], float &up) const;
+    // downhill is +1 (forward), -1 (backward) or 0 (flat).  slipping is
+    // set if a wheel spins uphill while the wheels that carry the weight
+    // stay put
+    void get_motion(int8_t downhill, float &fwd, float &diff, float side_speed[2], bool &slipping) const;
 
     // run one side's controller and return its throttle (-1 to +1)
     float update_side(SideHold &side, float error, float speed, float throttle_per_speed, float ff, int8_t downhill);
@@ -156,9 +157,8 @@ private:
     float _start_wheel[WHEELENCODER_MAX_INSTANCES]; // each wheel's distance when the hold started
     float _start_mean;          // mean wheel distance when the hold started
     bool _turn_measure;         // true if the last update measured the movement for a turn (mean of the wheels)
-    uint32_t _slip_start_ms;    // start of the current slip check, 0 if not checking
+    uint32_t _slip_start_ms;    // time a wheel started spinning uphill with the vehicle still, 0 if not
     float _slip_start_fwd;      // forward distance when that started
-    float _slip_start_up;       // distance of the wheel furthest uphill when that started
     int8_t _coast_dir;          // direction the wheels were still turning when the hold engaged (+1, -1), 0 once locked
     int8_t _request_dir = 1;    // direction of the last requested speed (+1, -1)
     bool _use_sides;            // true if holding each side separately

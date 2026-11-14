@@ -48,12 +48,13 @@ extern const AP_HAL::HAL& hal;
 // moved furthest downhill instead of the mean of its wheels
 #define AR_HHC_SLOPE_MIN_DEG        3.0f
 
-// if within AR_HHC_SLIP_MS a wheel turns more than AR_HHC_SLIP_SPIN
-// uphill while the wheels that carry the weight move less than
-// AR_HHC_SLIP_MOVE, that wheel is slipping and the hold point moves to
-// where the vehicle is
+// a wheel spinning uphill faster than this while the wheels that carry
+// the weight move slower than AR_HHC_STILL_SPEED is slipping.  If that
+// lasts AR_HHC_SLIP_MS and the vehicle moves less than AR_HHC_SLIP_MOVE,
+// the hold point moves to where the vehicle is
+#define AR_HHC_SLIP_SPEED           0.05f
+#define AR_HHC_STILL_SPEED          0.01f
 #define AR_HHC_SLIP_MS              500
-#define AR_HHC_SLIP_SPIN            0.005f
 #define AR_HHC_SLIP_MOVE            0.002f
 
 const AP_Param::GroupInfo AR_HillHoldControl::var_info[] = {
@@ -236,17 +237,15 @@ void AR_HillHoldControl::start_hold(uint32_t now_ms, bool coasting)
 // spins them uphill while the loaded wheels slide downhill.  In the mean
 // the two cancel, so the hold would not see the slide and would keep
 // reversing (a stuttering, ABS-like slide)
-void AR_HillHoldControl::get_motion(int8_t downhill, float &fwd, float &diff, float side_speed[2], float &up) const
+void AR_HillHoldControl::get_motion(int8_t downhill, float &fwd, float &diff, float side_speed[2], bool &slipping) const
 {
+    slipping = false;
     if (!_wheel_state.have_sides()) {
         fwd = _wheel_state.get_mean_distance() - _start_mean;
         diff = 0.0f;
         side_speed[0] = side_speed[1] = _wheel_state.get_mean_speed();
-        up = fwd;
         return;
     }
-
-    bool have_up = false;
 
     float side_dist[2];
     for (uint8_t s = 0; s < 2; s++) {
@@ -254,6 +253,7 @@ void AR_HillHoldControl::get_motion(int8_t downhill, float &fwd, float &diff, fl
         float speed_sum = 0.0f;
         float dist_down = 0.0f;
         float speed_down = 0.0f;
+        float speed_up = 0.0f;
         uint8_t count = 0;
         for (uint8_t i = 0; i < WHEELENCODER_MAX_INSTANCES; i++) {
             if (_wheel_state.get_wheel_side(i) != s) {
@@ -267,9 +267,8 @@ void AR_HillHoldControl::get_motion(int8_t downhill, float &fwd, float &diff, fl
             if ((count == 0) || ((speed * downhill) > (speed_down * downhill))) {
                 speed_down = speed;
             }
-            if (!have_up || ((dist * downhill) < (up * downhill))) {
-                up = dist;
-                have_up = true;
+            if ((count == 0) || ((speed * downhill) < (speed_up * downhill))) {
+                speed_up = speed;
             }
             dist_sum += dist;
             speed_sum += speed;
@@ -284,14 +283,14 @@ void AR_HillHoldControl::get_motion(int8_t downhill, float &fwd, float &diff, fl
         } else {
             side_dist[s] = dist_down;
             side_speed[s] = speed_down;
+            if (((-speed_up * downhill) > AR_HHC_SLIP_SPEED) && (fabsf(speed_down) < AR_HHC_STILL_SPEED)) {
+                slipping = true;
+            }
         }
     }
 
     fwd = 0.5f * (side_dist[0] + side_dist[1]);
     diff = 0.5f * (side_dist[1] - side_dist[0]);
-    if (!have_up) {
-        up = fwd;
-    }
 }
 
 // run one side's controller and return its throttle (-1 to +1)
@@ -420,14 +419,14 @@ bool AR_HillHoldControl::update_stopped(float cruise_speed, float cruise_throttl
     float fwd;
     float diff;
     float side_speed[2];
-    float up;
-    get_motion(_turn_requested ? 0 : downhill, fwd, diff, side_speed, up);
+    bool slipping;
+    get_motion(_turn_requested ? 0 : downhill, fwd, diff, side_speed, slipping);
     if (_turn_requested != _turn_measure) {
         float fwd_before;
         float diff_before;
         float speed_before[2];
-        float up_before;
-        get_motion(_turn_measure ? 0 : downhill, fwd_before, diff_before, speed_before, up_before);
+        bool slip_before;
+        get_motion(_turn_measure ? 0 : downhill, fwd_before, diff_before, speed_before, slip_before);
         _hold_fwd += fwd - fwd_before;
         _hold_diff += diff - diff_before;
         _turn_measure = _turn_requested;
@@ -455,19 +454,16 @@ bool AR_HillHoldControl::update_stopped(float cruise_speed, float cruise_throttl
 
     // a wheel spinning uphill while the vehicle stays below the hold
     // point: pushing harder only spins the light wheels, it cannot climb
-    // back.  If over AR_HHC_SLIP_MS a wheel turned uphill while the
-    // wheels that carry the weight stayed still, hold where the vehicle
-    // is.  A vehicle still sliding is not still, so this never lets it
-    // creep away
-    if ((downhill == 0) || _turn_requested || (((fwd - _hold_fwd) * downhill) <= 0.0f)) {
+    // back.  Once that has lasted AR_HHC_SLIP_MS with the vehicle still,
+    // hold where the vehicle is.  A vehicle still sliding is not still,
+    // so this never lets it creep away
+    if (!slipping || _turn_requested || (((fwd - _hold_fwd) * downhill) <= 0.0f)) {
         _slip_start_ms = 0;
     } else if (_slip_start_ms == 0) {
         _slip_start_ms = now_ms;
         _slip_start_fwd = fwd;
-        _slip_start_up = up;
     } else if ((now_ms - _slip_start_ms) >= AR_HHC_SLIP_MS) {
-        if ((fabsf(fwd - _slip_start_fwd) < AR_HHC_SLIP_MOVE) &&
-            (((_slip_start_up - up) * downhill) > AR_HHC_SLIP_SPIN)) {
+        if (fabsf(fwd - _slip_start_fwd) < AR_HHC_SLIP_MOVE) {
             _hold_fwd = fwd;
         }
         _slip_start_ms = 0;
