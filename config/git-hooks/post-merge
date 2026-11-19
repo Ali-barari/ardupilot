@@ -1,0 +1,13 @@
+#!/bin/bash
+
+# Post-merge hook - runs after 'git merge' and 'git pull'.
+# Avestec convention: only develop is tagged. Feature branches are fast-forward
+# merged into develop (merge.ff only), which creates no commit, so post-commit
+# never fires. This hook versions the new develop HEAD instead, with the bump
+# taken from every commit message brought in by the merge (ORIG_HEAD..HEAD).
+
+HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ORIG=$(git rev-parse -q --verify ORIG_HEAD 2>/dev/null) || exit 0
+[ "$ORIG" = "$(git rev-parse HEAD)" ] && exit 0
+
+AUTO_VERSION_RANGE="${ORIG}..HEAD" exec "$HOOK_DIR/post-commit"
